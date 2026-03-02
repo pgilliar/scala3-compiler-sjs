@@ -478,7 +478,7 @@ object SymDenotations {
 
     /** The expanded name of this denotation. */
     final def expandedName(using Context): Name =
-      if (name.is(ExpandedName) || isConstructor) name
+      if name.is(ExpandedName) || isConstructor then name
       else name.expandedName(initial.owner)
         // need to use initial owner to disambiguate, as multiple private symbols with the same name
         // might have been moved from different origins into the same class
@@ -2663,7 +2663,7 @@ object SymDenotations {
       for (sym <- scope.toList.iterator)
         // We need to be careful to not force the denotation of `sym` here,
         // otherwise it will be brought forward to the current run.
-        if (sym.defRunId != ctx.runId && sym.isClass && sym.asClass.compUnitInfo != null && sym.asClass.compUnitInfo.nn.associatedFile == file)
+        if (sym.defRunId != ctx.runId && sym.isClass && sym.asClass.compUnitInfo != null && sym.asClass.compUnitInfo.nn.associatedFile.path == file.path)
           scope.unlink(sym, sym.lastKnownDenotation.name)
     }
   }
