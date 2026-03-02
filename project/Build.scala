@@ -1807,7 +1807,7 @@ object Build {
 
     /* Configuration of the org.scala-lang:scala3-compiler_3:*.**.**-sjs project */
   lazy val `scala3-compiler-sjs` = project.in(file("compiler-sjs"))
-    .dependsOn(`scala3-interfaces-sjs`, `tasty-core-bootstrapped`, `scala3-library-sjs`)
+    .dependsOn(`scala3-interfaces-sjs`, `scala3-library-sjs`)
     .enablePlugins(DottyJSPlugin, ScalaJSPlugin)
     .settings(publishSettings)
     .settings(
@@ -1831,34 +1831,27 @@ object Build {
             "--experimental-wasm-exnref",
             "--experimental-wasm-jspi",
             "--experimental-wasm-imported-strings",
-            "--turboshaft-wasm"
           ))
         new NodeJSEnv(config)
       },
-      // Add the source directories for the compiler (boostrapped)
-      Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
-      Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
-      Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
-      // Add the test directories for the compiler (bootstrapped)
-      Test / unmanagedSourceDirectories := Seq(baseDirectory.value / "test"),
-      Test / unmanagedResourceDirectories += baseDirectory.value / "test-resources",
-      // All the dependencies needed by the compiler
       libraryDependencies ++= Seq(
         "org.scala-lang.modules" % "scala-asm" % "9.9.0-scala-1",
         Dependencies.compilerInterface,
-        "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
-        ("io.get-coursier" %% "coursier" % "2.0.16" % Test).cross(CrossVersion.for3Use2_13),
       ),
+      // Add the source directories for the compiler (boostrapped)
+      Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
+      Compile / unmanagedSourceDirectories += (`tasty-core-bootstrapped` / baseDirectory).value / "src",
+      Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
+      Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
       // Specify the default entry point of the compiler
       Compile / mainClass := Some("dotty.tools.dotc.Main"),
+      scalaJSUseMainModuleInitializer := true,
       // Add entry's to the MANIFEST
       packageOptions += ManifestAttributes(("Git-Hash", VersionUtil.gitHash)), // Used by the REPL
       // Packaging configuration of the stdlib
       Compile / packageBin / publishArtifact := true,
       Compile / packageDoc / publishArtifact := true,
       Compile / packageSrc / publishArtifact := true,
-      // Only publish compilation artifacts, no test artifacts
-      Test    / publishArtifact := false,
       // Do not allow to publish this project for now
       publish / skip := false,
       // Project specific target folder. sbt doesn't like having two projects using the same target folder
@@ -1908,39 +1901,6 @@ object Build {
           sjsSources
         } (Set(scalaJSIRSourcesJar)).toSeq
       }.taskValue,
-      Compile / run / forkOptions := (Compile / run / forkOptions).value
-        .withWorkingDirectory((ThisBuild / baseDirectory).value),
-      // Configuration of the test suite
-      Test / forkOptions := (Test / forkOptions).value
-        .withWorkingDirectory((ThisBuild / baseDirectory).value),
-      Test / test := (Test / testOnly).toTask(" -- --exclude-categories=dotty.VulpixMetaTests").value,
-      Test / testOptions += Tests.Argument(
-        TestFrameworks.JUnit,
-        "--run-listener=dotty.tools.ContextEscapeDetector",
-      ),
-      Test / javaOptions ++= {
-        val log = streams.value.log
-        val managedSrcDir = {
-          // Populate the directory
-          (Compile / managedSources).value
-
-          (Compile / sourceManaged).value
-        }
-        val externalDeps = (ThisProject / Runtime / externalDependencyClasspath).value
-        Seq(
-          s"-Ddotty.tests.dottyCompilerManagedSources=${managedSrcDir}",
-          s"-Ddotty.tests.classes.dottyInterfaces=${(`scala3-interfaces-sjs` / Compile / packageBin).value}",
-          s"-Ddotty.tests.classes.dottyCompiler=${(ThisProject / Compile / packageBin).value}",
-          s"-Ddotty.tests.classes.tastyCore=${(`tasty-core-bootstrapped` / Compile / packageBin).value}",
-          s"-Ddotty.tests.classes.compilerInterface=${findArtifactPath(externalDeps, "compiler-interface")}",
-          s"-Ddotty.tests.classes.scalaLibrary=${(`scala-library-bootstrapped` / Compile / packageBin).value}",
-          s"-Ddotty.tests.classes.scalaJSScalalib=${(`scala-library-sjs` / Compile / packageBin).value}",
-          s"-Ddotty.tests.classes.scalaAsm=${findArtifactPath(externalDeps, "scala-asm")}",
-          s"-Ddotty.tests.classes.dottyStaging=${(LocalProject("scala3-staging") / Compile / packageBin).value}",
-          s"-Ddotty.tests.classes.dottyTastyInspector=${(LocalProject("scala3-tasty-inspector") / Compile / packageBin).value}",
-          s"-Ddotty.tools.dotc.semanticdb.test=${(ThisBuild / baseDirectory).value/"tests"/"semanticdb"}",
-        )
-      },
       bspEnabled := enableBspAllProjects,
     )
 

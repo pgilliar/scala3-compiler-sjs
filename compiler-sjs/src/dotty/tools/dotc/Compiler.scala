@@ -38,7 +38,7 @@ class Compiler {
          CheckUnused.PostTyper(),   // Check for unused
          CheckShadowing()) ::       // Check for shadowed elements
     List(new YCheckPositions) ::    // YCheck positions
-    List(new sbt.ExtractDependencies) :: // Sends information on classes' dependencies to sbt via callbacks
+   // List(new sbt.ExtractDependencies) :: // Sends information on classes' dependencies to sbt via callbacks
     List(ExtractSemanticInfo()) ::  // Extract info into .semanticdb files
     List(new PostTyper) ::          // Additional checks and cleanups after type checking
     List(new UnrollDefinitions) ::  // Unroll annotated methods if detected in PostTyper
@@ -49,7 +49,7 @@ class Compiler {
   /** Phases dealing with TASTY tree pickling and unpickling */
   protected def picklerPhases: List[List[Phase]] =
     List(new Pickler) ::            // Generate TASTY info
-    List(new sbt.ExtractAPI) ::     // Sends a representation of the API of classes to sbt via callbacks
+  //  List(new sbt.ExtractAPI) ::     // Sends a representation of the API of classes to sbt via callbacks
     List(new Inlining) ::           // Inline and execute macros
     List(new PostInlining) ::       // Add mirror support for inlined code
     List(new Staging) ::            // Check staging levels and heal staged types
@@ -151,7 +151,7 @@ class Compiler {
   /** Generate the output of the compilation */
   protected def backendPhases: List[List[Phase]] =
     List(new backend.sjs.GenSJSIR) :: // Generate .sjsir files for Scala.js (not enabled by default)
-    List(new GenBCode) ::             // Generate JVM bytecode
+  //  List(new GenBCode) ::             // Generate JVM bytecode
     Nil
 
   // TODO: Initially 0, so that the first nextRunId call would return InitialRunId == 1
