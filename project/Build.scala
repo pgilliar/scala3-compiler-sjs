@@ -35,6 +35,8 @@ import org.scalajs.sbtplugin.ScalaJSPlugin
 import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport._
 
 import org.scalajs.linker.interface.ESVersion
+import org.scalajs.linker.interface.ModuleKind
+import org.scalajs.jsenv.nodejs.NodeJSEnv
 
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport._
@@ -621,6 +623,40 @@ object Build {
       mimaBackwardIssueFilters := MiMaFilters.Interfaces.BackwardsBreakingChanges,
       customMimaReportBinaryIssues("MiMaFilters.Interfaces"),
     )
+
+  lazy val `scala3-interfaces-sjs` = project.in(file("interfaces-sjs"))
+  .dependsOn(`scala3-library-sjs`)
+  .settings(publishSettings)
+  .settings(commonMiMaSettings)
+  .settings(
+    name          := "interfaces-sjs",
+    moduleName    := "interfaces-sjs",
+    version       := dottyVersion,
+    versionScheme := Some("semver-spec"),
+    scalaVersion  := dottyNonBootstrappedVersion,
+    crossPaths    := true, // org.scala-lang:tasty-core has a crosspath
+    // sbt shouldn't add stdlib automatically, we depend on `scala3-library-sjs`
+    autoScalaLibrary := false,
+    // Add the source directories for the stdlib (non-boostrapped)
+    Compile / unmanagedSourceDirectories := Seq(baseDirectory.value / "src"),
+    Test    / unmanagedSourceDirectories := Seq(baseDirectory.value / "test"),
+    Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
+    // Packaging configuration of the stdlib
+    Compile / packageBin / publishArtifact := true,
+    Compile / packageDoc / publishArtifact := true,
+    Compile / packageSrc / publishArtifact := true,
+    // Only publish compilation artifacts, no test artifacts
+    Test    / publishArtifact := false,
+    // Do not allow to publish this project for now
+    publish / skip := false,
+    // Project specific target folder. sbt doesn't like having two projects using the same target folder
+    target := target.value / "interfaces-sjs",
+    // Configure to use the non-bootstrapped compiler
+    bootstrappedScalaInstanceSettings,
+    mimaForwardIssueFilters := MiMaFilters.Interfaces.ForwardsBreakingChanges,
+    mimaBackwardIssueFilters := MiMaFilters.Interfaces.BackwardsBreakingChanges,
+    customMimaReportBinaryIssues("MiMaFilters.Interfaces"),
+  )
 
   /** Find an artifact with the given `name` in `classpath` */
   def findArtifact(classpath: Def.Classpath, name: String): File = classpath
@@ -1755,6 +1791,145 @@ object Build {
         Seq(
           s"-Ddotty.tests.dottyCompilerManagedSources=${managedSrcDir}",
           s"-Ddotty.tests.classes.dottyInterfaces=${(`scala3-interfaces` / Compile / packageBin).value}",
+          s"-Ddotty.tests.classes.dottyCompiler=${(ThisProject / Compile / packageBin).value}",
+          s"-Ddotty.tests.classes.tastyCore=${(`tasty-core-bootstrapped` / Compile / packageBin).value}",
+          s"-Ddotty.tests.classes.compilerInterface=${findArtifactPath(externalDeps, "compiler-interface")}",
+          s"-Ddotty.tests.classes.scalaLibrary=${(`scala-library-bootstrapped` / Compile / packageBin).value}",
+          s"-Ddotty.tests.classes.scalaJSScalalib=${(`scala-library-sjs` / Compile / packageBin).value}",
+          s"-Ddotty.tests.classes.scalaAsm=${findArtifactPath(externalDeps, "scala-asm")}",
+          s"-Ddotty.tests.classes.dottyStaging=${(LocalProject("scala3-staging") / Compile / packageBin).value}",
+          s"-Ddotty.tests.classes.dottyTastyInspector=${(LocalProject("scala3-tasty-inspector") / Compile / packageBin).value}",
+          s"-Ddotty.tools.dotc.semanticdb.test=${(ThisBuild / baseDirectory).value/"tests"/"semanticdb"}",
+        )
+      },
+      bspEnabled := enableBspAllProjects,
+    )
+
+    /* Configuration of the org.scala-lang:scala3-compiler_3:*.**.**-sjs project */
+  lazy val `scala3-compiler-sjs` = project.in(file("compiler-sjs"))
+    .dependsOn(`scala3-interfaces-sjs`, `tasty-core-bootstrapped`, `scala3-library-sjs`)
+    .enablePlugins(DottyJSPlugin, ScalaJSPlugin)
+    .settings(publishSettings)
+    .settings(
+      name          := "scala3-compiler-sjs",
+      moduleName    := "scala3-compiler-sjs",
+      version       := dottyVersion,
+      versionScheme := Some("semver-spec"),
+      scalaVersion  := dottyNonBootstrappedVersion,
+      crossPaths    := false, // org.scala-lang:scala3-compiler has a crosspath
+      // sbt shouldn't add stdlib automatically, we depend on `scala3-library-nonbootstrapped`
+      autoScalaLibrary := false,
+      // WASM config
+      scalaJSLinkerConfig := {
+        scalaJSLinkerConfig.value
+          .withExperimentalUseWebAssembly(true)   // enable wasm backend
+          .withModuleKind(ModuleKind.ESModule)    // required for wasm
+      },
+      jsEnv := {
+        val config = NodeJSEnv.Config()
+          .withArgs(List(
+            "--experimental-wasm-exnref",
+            "--experimental-wasm-jspi",
+            "--experimental-wasm-imported-strings",
+            "--turboshaft-wasm"
+          ))
+        new NodeJSEnv(config)
+      },
+      // Add the source directories for the compiler (boostrapped)
+      Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
+      Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
+      Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
+      // Add the test directories for the compiler (bootstrapped)
+      Test / unmanagedSourceDirectories := Seq(baseDirectory.value / "test"),
+      Test / unmanagedResourceDirectories += baseDirectory.value / "test-resources",
+      // All the dependencies needed by the compiler
+      libraryDependencies ++= Seq(
+        "org.scala-lang.modules" % "scala-asm" % "9.9.0-scala-1",
+        Dependencies.compilerInterface,
+        "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
+        ("io.get-coursier" %% "coursier" % "2.0.16" % Test).cross(CrossVersion.for3Use2_13),
+      ),
+      // Specify the default entry point of the compiler
+      Compile / mainClass := Some("dotty.tools.dotc.Main"),
+      // Add entry's to the MANIFEST
+      packageOptions += ManifestAttributes(("Git-Hash", VersionUtil.gitHash)), // Used by the REPL
+      // Packaging configuration of the stdlib
+      Compile / packageBin / publishArtifact := true,
+      Compile / packageDoc / publishArtifact := true,
+      Compile / packageSrc / publishArtifact := true,
+      // Only publish compilation artifacts, no test artifacts
+      Test    / publishArtifact := false,
+      // Do not allow to publish this project for now
+      publish / skip := false,
+      // Project specific target folder. sbt doesn't like having two projects using the same target folder
+      target := target.value / "scala3-compiler-sjs",
+      // Generate compiler.properties, used by sbt
+      Compile / resourceGenerators += generateCompilerProperties.taskValue,
+      // Configure to use the non-bootstrapped compiler
+      bootstrappedScalaInstanceSettings,
+      /* Add the sources of scalajs-ir.
+       * To guarantee that dotty can bootstrap without depending on a version
+       * of scalajs-ir built with a different Scala compiler, we add its
+       * sources instead of depending on the binaries.
+       */
+      ivyConfigurations += SourceDeps.hide,
+      transitiveClassifiers := Seq("sources"),
+      libraryDependencies +=
+        ("org.scala-js" %% "scalajs-ir" % scalaJSVersion % "sourcedeps").cross(CrossVersion.for3Use2_13),
+      Compile / sourceGenerators += Def.task {
+        val s = streams.value
+        val cacheDir = s.cacheDirectory
+        val trgDir = (Compile / sourceManaged).value / "scalajs-ir-src"
+
+        val report = updateClassifiers.value
+        val scalaJSIRSourcesJar = report.select(
+            configuration = configurationFilter("sourcedeps"),
+            module = (_: ModuleID).name.startsWith("scalajs-ir_"),
+            artifact = artifactFilter(`type` = "src")).headOption.getOrElse {
+          sys.error(s"Could not fetch scalajs-ir sources")
+        }
+
+        FileFunction.cached(cacheDir / s"fetchScalaJSIRSource",
+            FilesInfo.lastModified, FilesInfo.exists) { dependencies =>
+          s.log.info(s"Unpacking scalajs-ir sources to $trgDir...")
+          if (trgDir.exists)
+            IO.delete(trgDir)
+          IO.createDirectory(trgDir)
+          IO.unzip(scalaJSIRSourcesJar, trgDir)
+
+          val sjsSources = (trgDir ** "*.scala").get.toSet
+          sjsSources.foreach(f => {
+            val lines = IO.readLines(f)
+            val linesWithPackage = replacePackage(lines) {
+              case "org.scalajs.ir" => "dotty.tools.sjs.ir"
+            }
+            IO.writeLines(f, insertUnsafeNullsImport(linesWithPackage))
+          })
+          sjsSources
+        } (Set(scalaJSIRSourcesJar)).toSeq
+      }.taskValue,
+      Compile / run / forkOptions := (Compile / run / forkOptions).value
+        .withWorkingDirectory((ThisBuild / baseDirectory).value),
+      // Configuration of the test suite
+      Test / forkOptions := (Test / forkOptions).value
+        .withWorkingDirectory((ThisBuild / baseDirectory).value),
+      Test / test := (Test / testOnly).toTask(" -- --exclude-categories=dotty.VulpixMetaTests").value,
+      Test / testOptions += Tests.Argument(
+        TestFrameworks.JUnit,
+        "--run-listener=dotty.tools.ContextEscapeDetector",
+      ),
+      Test / javaOptions ++= {
+        val log = streams.value.log
+        val managedSrcDir = {
+          // Populate the directory
+          (Compile / managedSources).value
+
+          (Compile / sourceManaged).value
+        }
+        val externalDeps = (ThisProject / Runtime / externalDependencyClasspath).value
+        Seq(
+          s"-Ddotty.tests.dottyCompilerManagedSources=${managedSrcDir}",
+          s"-Ddotty.tests.classes.dottyInterfaces=${(`scala3-interfaces-sjs` / Compile / packageBin).value}",
           s"-Ddotty.tests.classes.dottyCompiler=${(ThisProject / Compile / packageBin).value}",
           s"-Ddotty.tests.classes.tastyCore=${(`tasty-core-bootstrapped` / Compile / packageBin).value}",
           s"-Ddotty.tests.classes.compilerInterface=${findArtifactPath(externalDeps, "compiler-interface")}",
