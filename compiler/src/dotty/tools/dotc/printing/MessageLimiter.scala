@@ -33,7 +33,7 @@ class DefaultMessageLimiter extends MessageLimiter:
   override def recursionLimitExceeded()(using Context): Unit =
     if ctx.debug then
       report.warning("Exceeded recursion depth attempting to print.")
-      Thread.dumpStack()
+      dotty.tools.dotc.util.PlatformDependent.platformDependent(Thread.dumpStack())(())
 
 class SummarizeMessageLimiter(depth: Int) extends MessageLimiter:
   override val recurseLimit = recurseCount + depth
@@ -57,5 +57,3 @@ class ErrorMessageLimiter extends MessageLimiter:
     // every 200 characters consumes a "recurseCount"
     // which, additionally, is lowered from 100 to 50 here
     (initialRecurseLimit * freeFraction).toInt
-
-

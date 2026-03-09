@@ -22,6 +22,7 @@ import quoted.*
 import sbt.{ AbstractExtractDependenciesCollector, DependencyRecorder }
 import staging.StagingLevel
 import util.Property
+import util.PlatformDependent.platformDependent
 
 import scala.collection.mutable
 import scala.io.Codec
@@ -52,7 +53,7 @@ class Inlining extends MacroTransform, IdentityDenotTransformer {
     if unit.needsInlining || unit.hasMacroAnnotations then
       super.run
 
-    if ctx.settings.YdumpSbtInc.value then
+    if platformDependent(ctx.settings.YdumpSbtInc.value)(false) then
       val deps = rec.foundDeps.iterator.map { case (clazz, found) => s"$clazz: ${found.classesString}" }.toArray[Object]
       val names = rec.foundDeps.iterator.map { case (clazz, found) => s"$clazz: ${found.namesString}" }.toArray[Object]
       Arrays.sort(deps)
@@ -92,11 +93,18 @@ class Inlining extends MacroTransform, IdentityDenotTransformer {
   def newTransformer(using Context): Transformer = new Transformer {
     override def transform(tree: tpd.Tree)(using Context): tpd.Tree =
       val rec = ctx.compilationUnit.depRecorder
-      val collector = ExtractInlineDependenciesCollector(rec)
+      val collector: InlineDependencyCollector =
+        platformDependent(new ExtractInlineDependenciesCollector(rec))(NoOpInlineDependencyCollector)
       InliningTreeMap(collector).transform(tree)
   }
 
-  private class ExtractInlineDependenciesCollector(rec: DependencyRecorder) extends AbstractExtractDependenciesCollector(rec):
+  private trait InlineDependencyCollector:
+    def traverse(tree: Tree)(using Context): Unit
+
+  private object NoOpInlineDependencyCollector extends InlineDependencyCollector:
+    override def traverse(tree: Tree)(using Context): Unit = ()
+
+  private class ExtractInlineDependenciesCollector(rec: DependencyRecorder) extends AbstractExtractDependenciesCollector(rec), InlineDependencyCollector:
     /** Traverse the tree of a source file and record the dependencies and used names which
      *  can be retrieved using `rec`.
      */
@@ -105,7 +113,7 @@ class Inlining extends MacroTransform, IdentityDenotTransformer {
       traverseChildren(tree)
   end ExtractInlineDependenciesCollector
 
-  private class InliningTreeMap(collector: ExtractInlineDependenciesCollector) extends TreeMapWithTrackedStats {
+  private class InliningTreeMap(collector: InlineDependencyCollector) extends TreeMapWithTrackedStats {
 
     /** List of top level classes added by macro annotation in a package object.
      *  These are added to the PackageDef that owns this particular package object.

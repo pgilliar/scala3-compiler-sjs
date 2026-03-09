@@ -20,16 +20,21 @@ import dotty.tools.io.AbstractFile
 import annotation.internal.sharable
 import dotty.tools.dotc.core.Periods.InitialRunId
 import scala.collection.mutable.UnrolledBuffer
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 object Profiler {
   def apply()(using Context): Profiler =
-    if (!ctx.settings.YprofileEnabled.value) NoOpProfiler
-    else {
-      val reporter = if (ctx.settings.YprofileDestination.value != "")
-        new StreamProfileReporter(new PrintWriter(new FileWriter(ctx.settings.YprofileDestination.value, true)))
-      else ConsoleProfileReporter
-      new RealProfiler(reporter)
-    }
+    platformDependent(
+      if (!ctx.settings.YprofileEnabled.value) NoOpProfiler
+      else {
+        val reporter = if (ctx.settings.YprofileDestination.value != "")
+          new StreamProfileReporter(new PrintWriter(new FileWriter(ctx.settings.YprofileDestination.value, true)))
+        else ConsoleProfileReporter
+        new RealProfiler(reporter)
+      }
+    )(
+      NoOpProfiler
+    )
 
   final def NoOp: Profiler = NoOpProfiler
 

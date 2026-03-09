@@ -139,7 +139,7 @@ object Plugin {
 
     def loadDescriptionFromDir(f: Path): Try[String] = {
       val path = f / PluginFile
-      Try(fromFile(new java.io.FileInputStream(path.jpath.toFile), path))
+      Try(fromFile(path.toFile.inputStream(), path))
     }
 
     def loadDescriptionFromJar(jarp: Path): Try[String] = {
@@ -149,7 +149,7 @@ object Plugin {
         else fromFile(is, jarp)
 
       val fileEntry = new java.util.jar.JarEntry(PluginFile)
-      Try(read(new Jar(jarp.jpath.toFile).getEntryStream(fileEntry)))
+      Try(read(new Jar(jarp.toFile).getEntryStream(fileEntry)))
     }
 
     // List[(jar, Try(descriptor))] in dir

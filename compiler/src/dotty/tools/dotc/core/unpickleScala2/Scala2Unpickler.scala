@@ -20,6 +20,7 @@ import printing.Texts.{*, given}
 import printing.Printer
 import io.AbstractFile
 import util.common.*
+import util.DebugTrace
 import util.NoSourcePosition
 import typer.Checking.checkNonCyclic
 import typer.Nullables.*
@@ -173,7 +174,7 @@ class Scala2Unpickler(bytes: Array[Byte], classRoot: ClassDenotation, moduleClas
     val ex = new BadSignature(
       i"""error reading Scala signature of $classRoot from $source:
          |error occurred at position $readIndex: $msg""")
-    if (ctx.settings.YdebugMissingRefs.value) original.getOrElse(ex).printStackTrace()
+    if ctx.settings.YdebugMissingRefs.value then DebugTrace.printThrowable(original.getOrElse(ex))
     throw ex
   }
 
@@ -423,7 +424,7 @@ class Scala2Unpickler(bytes: Array[Byte], classRoot: ClassDenotation, moduleClas
               owner.info.decls.checkConsistent()
               if (slowSearch(name).exists)
                 System.err.println(i"**** slow search found: ${slowSearch(name)}")
-              if (ctx.settings.YdebugMissingRefs.value) Thread.dumpStack()
+              if ctx.settings.YdebugMissingRefs.value then DebugTrace.dumpCurrentStack()
               newStubSymbol(owner, name, CompilationUnitInfo(source))
             }
           }

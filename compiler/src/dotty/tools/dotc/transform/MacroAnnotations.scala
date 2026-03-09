@@ -16,6 +16,7 @@ import core.Symbols.*
 import core.Types.*
 import quoted.*
 import util.SrcPos
+import util.PlatformDependent.platformDependent
 import scala.quoted.runtime.impl.{QuotesImpl, SpliceScope}
 
 import scala.quoted.Quotes
@@ -43,50 +44,58 @@ object MacroAnnotations:
    *  Returns a list with transformed definition and any added definitions.
    */
   def expandAnnotations(tree: MemberDef, companion: Option[MemberDef])(using Context): (List[MemberDef], Option[MemberDef]) =
-    if !tree.symbol.hasMacroAnnotation then
-      (List(tree), companion)
-    else if tree.symbol.is(ModuleVal) then
-      // only module classes are transformed
-      (List(tree), companion)
-    else if tree.symbol.isType && !tree.symbol.isClass then
-      report.error("macro annotations are not supported on type", tree)
-      (List(tree), companion)
-    else
-      debug.println(i"Expanding macro annotations of:\n$tree")
-      val macroInterpreter = new Interpreter(tree.srcPos, MacroClassLoader.fromContext)
+    platformDependent(
+      if !tree.symbol.hasMacroAnnotation then
+        (List(tree), companion)
+      else if tree.symbol.is(ModuleVal) then
+        // only module classes are transformed
+        (List(tree), companion)
+      else if tree.symbol.isType && !tree.symbol.isClass then
+        report.error("macro annotations are not supported on type", tree)
+        (List(tree), companion)
+      else
+        debug.println(i"Expanding macro annotations of:\n$tree")
+        val macroInterpreter = new Interpreter(tree.srcPos, MacroClassLoader.fromContext)
 
-      val prefixedTrees = List.newBuilder[MemberDef]
+        val prefixedTrees = List.newBuilder[MemberDef]
 
-      // Apply all macro annotation to `tree` and collect new definitions in order
-      val unprocessed = (tree, companion, List.empty[MemberDef])
-      val (transformedTree, transformedCompanion, suffixed) =
-        tree.symbol.annotations.foldLeft(unprocessed): (lastResult, annot) =>
-          if annot.isMacroAnnotation then
-            val (tree, companion, suffixed) = lastResult
-            debug.println(i"Expanding macro annotation: ${annot}")
-            // Interpret call to `new myAnnot(..).transform(using <Quotes>)(<tree>, <companion>)`
-            val (transformedTrees, transformedCompanion) = callMacro(macroInterpreter, tree, companion, annot)
-            // Establish the trees order and check the integrity of the trees
-            transformedTrees.span(_.symbol != tree.symbol) match
-              case (newPrefixed, newTree :: newSuffixed) =>
-                // Check the integrity of the generated trees
-                for prefixedTree <- newPrefixed do checkMacroDef(prefixedTree, tree, annot)
-                for suffixedTree <- newSuffixed do checkMacroDef(suffixedTree, tree, annot)
-                for tcompanion <- transformedCompanion do TreeChecker.checkMacroGeneratedTree(companion.get, tcompanion)
-                TreeChecker.checkMacroGeneratedTree(tree, newTree)
-                prefixedTrees ++= newPrefixed
-                (newTree, transformedCompanion, newSuffixed ::: suffixed)
-              case (_, Nil) =>
-                report.error(i"Transformed tree for ${tree.symbol} was not return by `(${annot.tree}).transform(..)` during macro expansion", annot.tree.srcPos)
-                lastResult
-          else
-            lastResult
-      end val
+        // Apply all macro annotation to `tree` and collect new definitions in order
+        val unprocessed = (tree, companion, List.empty[MemberDef])
+        val (transformedTree, transformedCompanion, suffixed) =
+          tree.symbol.annotations.foldLeft(unprocessed): (lastResult, annot) =>
+            if annot.isMacroAnnotation then
+              val (tree, companion, suffixed) = lastResult
+              debug.println(i"Expanding macro annotation: ${annot}")
+              // Interpret call to `new myAnnot(..).transform(using <Quotes>)(<tree>, <companion>)`
+              val (transformedTrees, transformedCompanion) = callMacro(macroInterpreter, tree, companion, annot)
+              // Establish the trees order and check the integrity of the trees
+              transformedTrees.span(_.symbol != tree.symbol) match
+                case (newPrefixed, newTree :: newSuffixed) =>
+                  // Check the integrity of the generated trees
+                  for prefixedTree <- newPrefixed do checkMacroDef(prefixedTree, tree, annot)
+                  for suffixedTree <- newSuffixed do checkMacroDef(suffixedTree, tree, annot)
+                  for tcompanion <- transformedCompanion do TreeChecker.checkMacroGeneratedTree(companion.get, tcompanion)
+                  TreeChecker.checkMacroGeneratedTree(tree, newTree)
+                  prefixedTrees ++= newPrefixed
+                  (newTree, transformedCompanion, newSuffixed ::: suffixed)
+                case (_, Nil) =>
+                  report.error(i"Transformed tree for ${tree.symbol} was not return by `(${annot.tree}).transform(..)` during macro expansion", annot.tree.srcPos)
+                  lastResult
+            else
+              lastResult
+        end val
 
-      // Complete the list of transformed/generated definitions
-      val result = prefixedTrees.result() ::: transformedTree :: suffixed
-      debug.println(result.map(_.show).mkString("expanded to:\n", "\n", ""))
-      (result, transformedCompanion)
+        // Complete the list of transformed/generated definitions
+        val result = prefixedTrees.result() ::: transformedTree :: suffixed
+        debug.println(result.map(_.show).mkString("expanded to:\n", "\n", ""))
+        (result, transformedCompanion)
+    )(
+      if !tree.symbol.hasMacroAnnotation then
+        (List(tree), companion)
+      else
+        // TODO SJS: implement macro annotation expansion on the JS compiler path.
+        (List(tree), companion)
+    )
   end expandAnnotations
 
   /** Interpret the code `new annot(..).transform(using <Quotes(ctx)>)(<tree>, <companion>)` */

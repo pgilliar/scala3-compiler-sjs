@@ -9,8 +9,8 @@ import reporting.*
 import config.Config
 import config.Printers.constr
 import collection.mutable
-import java.lang.ref.WeakReference
 import util.{Stats, SimpleIdentityMap}
+import util.PlatformRef
 import Decorators.*
 
 import scala.annotation.internal.sharable
@@ -18,10 +18,10 @@ import scala.compiletime.uninitialized
 
 object TyperState {
   @sharable private var nextId: Int = 0
-  def initialState() =
+  def initialState(initialReporter: => Reporter = new ConsoleReporter()) =
     TyperState()
       .init(null, OrderingConstraint.empty)
-      .setReporter(new ConsoleReporter())
+      .setReporter(initialReporter)
       .setCommittable(true)
 
   type LevelMap = SimpleIdentityMap[TypeVar, Integer]
@@ -275,7 +275,7 @@ class TyperState() {
     if oldState != null && oldState.isCommittable then
       throw BadTyperStateAssertion(
         i"$this attempted to take ownership of $tvar which is already owned by committable $oldState")
-    tvar.owningState = new WeakReference(this)
+    tvar.owningState = PlatformRef(this)
     ownedVars += tvar
 
   private def isOwnedAnywhere(ts: TyperState, tvar: TypeVar): Boolean =

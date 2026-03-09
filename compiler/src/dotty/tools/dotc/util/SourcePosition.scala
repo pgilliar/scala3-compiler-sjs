@@ -30,7 +30,7 @@ extends SrcPos, interfaces.SourcePosition, Showable:
 
   /** Extracts the lines from the underlying source file as `Array[Char]`*/
   def linesSlice: Array[Char] =
-    source.content.slice(source.startOfLine(start), source.nextLine(end))
+    source.content().slice(source.startOfLine(start), source.nextLine(end))
 
   /** The lines of the position */
   def lines: Range = {

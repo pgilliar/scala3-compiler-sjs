@@ -1,6 +1,6 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
 
-trait  DiagnosticRelatedInformation {
+trait DiagnosticRelatedInformation {
   def position: SourcePosition
   def message: String
 }

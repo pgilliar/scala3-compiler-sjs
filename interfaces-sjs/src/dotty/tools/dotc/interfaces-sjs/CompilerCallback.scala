@@ -1,4 +1,4 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
 
 /** Set of callbacks called in response to events during the compilation process.
  *

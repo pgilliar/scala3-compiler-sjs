@@ -1,7 +1,6 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
 
-import java.util.Optional;
-import java.util.List;
+import java.util.{List => JList, Optional}
 
 /** A diagnostic is a message emitted during the compilation process.
  *
@@ -20,10 +19,10 @@ trait Diagnostic {
 
   /** @return The position in a source file of the code that caused this diagnostic
    *  to be emitted. */
-  def position: Option[SourcePosition]
+  def position: Optional[SourcePosition]
 
   /** @return A list of additional messages together with their code positions */
-  def diagnosticRelatedInformation: List[DiagnosticRelatedInformation]
+  def diagnosticRelatedInformation: JList[DiagnosticRelatedInformation]
 }
 
 object Diagnostic:

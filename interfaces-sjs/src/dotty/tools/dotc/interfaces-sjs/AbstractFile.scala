@@ -1,4 +1,7 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
+
+import java.io.File
+import java.util.Optional
 
 /** An abstract file may either be a file on disk or a virtual file.
  *
@@ -15,8 +18,8 @@ trait AbstractFile {
   /** @return The path of this file, this might be a virtual path of an unspecified format. */
   def path: String
 
-  /** @return If this is a real file on disk, a file path that corresponds to this file.
+  /** @return If this is a real file on disk, a `java.io.File` that corresponds to this file.
    *  Otherwise, an empty `Optional`.
    */
-  def diskPath: Option[String]
+  def jfile: Optional[File] = Optional.empty()
 }

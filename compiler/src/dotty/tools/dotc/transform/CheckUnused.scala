@@ -20,6 +20,7 @@ import typer.Deriving.OriginalTypeClass
 import typer.Implicits.{ContextualImplicits, RenamedImplicitRef}
 import util.{Property, Spans, SrcPos}, Spans.Span
 import util.Chars.{isLineBreakChar, isWhitespace}
+import util.PlatformDependent.platformDependent
 import util.chaining.*
 
 import java.util.IdentityHashMap
@@ -999,13 +1000,18 @@ object CheckUnused:
             // in lieu of drilling into requiredClass("scala.quoted.runtime.impl.QuotesImpl")
             // ...member("reflect")...member(unapplied.name.toTypeName)
             // with aliases into requiredModule("dotty.tools.dotc.ast.tpd")
-            val implName = s"dotty.tools.dotc.ast.Trees$$${unapplied.name}"
-            try
-              import scala.language.unsafeNulls
-              val clz = Class.forName(implName) // TODO improve to use class path or reflect
-              val ok = clz.getConstructors.head.getParameters.map(p => termName(p.getName)).toList.init
-              allowVariableBindings(ok, args)
-            catch case _: ClassNotFoundException => ()
+            platformDependent[Unit]({
+              val implName = s"dotty.tools.dotc.ast.Trees$$${unapplied.name}"
+              try
+                import scala.language.unsafeNulls
+                val clz = Class.forName(implName) // TODO improve to use class path or reflect
+                val ok = clz.getConstructors.head.getParameters.map(p => termName(p.getName)).toList.init
+                allowVariableBindings(ok, args)
+              catch case _: ClassNotFoundException => ()
+            })(
+              //TODO SJS
+              ()
+            )
         args.foreach(traverse)
       case tree => traverseChildren(tree)
 

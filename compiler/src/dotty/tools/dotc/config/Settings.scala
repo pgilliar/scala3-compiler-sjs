@@ -86,6 +86,15 @@ object Settings:
   def validateSettingTag(ct: ClassTag[?]): Unit =
     assert(validTags.contains(ct), s"Unsupported option value $ct")
 
+  private def instantiateOptionValue(propertyClass: Class[?]): Option[Any] =
+    util.PlatformDependent.platformDependent(
+      Some(propertyClass.getConstructor().newInstance())
+    )(
+      propertyClass.getName match
+        case "dotty.tools.dotc.rewrites.Rewrites" => Some(new dotty.tools.dotc.rewrites.Rewrites)
+        case _ => None
+    )
+
   /** List of setting-value pairs that are required for another setting to be valid.
     * For example, `s = Setting(..., depends = List(YprofileEnabled -> true))`
     * means that `s` requires `YprofileEnabled` to be set to `true`.
@@ -256,7 +265,13 @@ object Settings:
           if ignoreInvalidArgs then state.warn(s"$msg, the tag was ignored", args) else state.fail(msg, args)
 
         if ct == BooleanTag then setBoolean(argRest, args)
-        else if ct == OptionTag then update(Some(propertyClass.get.getConstructor().newInstance()), "", args)
+        else if ct == OptionTag then
+          propertyClass.flatMap(Settings.instantiateOptionValue) match
+            case Some(optionValue) =>
+              update(optionValue, "", args)
+            case None =>
+              val className = propertyClass.fold("<missing>")(_.getName)
+              state.fail(s"unsupported no-arg option value $className for $name", args)
         else
           // `-option:v` or `-option v`
           val (arg1, args1) =

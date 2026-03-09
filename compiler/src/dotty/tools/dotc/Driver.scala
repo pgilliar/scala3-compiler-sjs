@@ -10,6 +10,7 @@ import dotty.tools.io.{AbstractFile, FileExtension}
 import reporting.*
 import core.Decorators.*
 import util.chaining.*
+import util.PlatformDependent.platformDependent
 
 import scala.util.control.NonFatal
 import fromtasty.{TASTYCompiler, TastyFileUtil}
@@ -23,8 +24,12 @@ import fromtasty.{TASTYCompiler, TastyFileUtil}
 class Driver {
 
   protected def newCompiler(using Context): Compiler =
-    if (ctx.settings.fromTasty.value) new TASTYCompiler
-    else new Compiler
+    platformDependent(
+      if ctx.settings.fromTasty.value then new TASTYCompiler
+      else new Compiler
+    )(
+      new Compiler
+    )
 
   protected def emptyReporter: Reporter = new StoreReporter(null)
 
@@ -61,7 +66,10 @@ class Driver {
           report.echo(s"  $unit at ${if atInlining then "inlining" else "typer"}: $hint")
       val run1 = compiler.newRun
       run1.compileSuspendedUnits(suspendedUnits, !run.suspendedAtTyperPhase)
-      finish(compiler, run1)(using MacroClassLoader.init(ctx.fresh))
+      val nextCtx = ctx.fresh
+      // TODO SJS : macro class loader equivalent
+      val _ = platformDependent[Unit]({ MacroClassLoader.init(nextCtx); () })(())
+      finish(compiler, run1)(using nextCtx)
 
   protected def initCtx: Context = (new ContextBase).initialCtx
 
@@ -80,7 +88,8 @@ class Driver {
     val ictx = rootCtx.fresh
     val summary = command.distill(args, ictx.settings)(ictx.settingsState)(using ictx)
     ictx.setSettings(summary.sstate)
-    MacroClassLoader.init(ictx)
+    // TODO SJS : macro class loader equivalent
+    val _ = platformDependent[Unit]({ MacroClassLoader.init(ictx); () })(())
     Positioned.init(using ictx)
 
     inContext(ictx):
@@ -92,45 +101,52 @@ class Driver {
         (files, fromTastySetup(files))
       .tap: _ =>
         if !ctx.settings.Yreporter.isDefault then
-          ctx.settings.Yreporter.value match
-          case "help" =>
-          case reporterClassName =>
-            try
-              Class.forName(reporterClassName).getDeclaredConstructor().newInstance() match
-              case userReporter: Reporter =>
-                ictx.setReporter(userReporter)
-              case badReporter => report.error:
-                em"Not a reporter: ${ctx.settings.Yreporter.value}"
-            catch case e: ReflectiveOperationException => report.error:
-              em"Could not create reporter ${ctx.settings.Yreporter.value}: ${e}"
+          platformDependent[Unit](
+            ctx.settings.Yreporter.value match
+            case "help" =>
+            case reporterClassName =>
+              try
+                Class.forName(reporterClassName).getDeclaredConstructor().newInstance() match
+                case userReporter: Reporter =>
+                  ictx.setReporter(userReporter)
+                case _ => report.error:
+                  em"Not a reporter: ${ctx.settings.Yreporter.value}"
+              catch case e: ReflectiveOperationException => report.error:
+                em"Could not create reporter ${ctx.settings.Yreporter.value}: ${e}"
+          )(
+            //TODO SJS: -Yreporter
+            report.error(em"`-Yreporter` is not supported by scala3-compiler-sjs")
+          )
   }
 
   /** Setup extra classpath of tasty and jar files */
   protected def fromTastySetup(files: List[AbstractFile])(using Context): Context =
-    if ctx.settings.fromTasty.value then
-      val newEntries: List[String] = files
-        .flatMap { file =>
-          if !file.exists then
-            report.error(em"File does not exist: ${file.path}")
-            None
-          else file.ext match
-            case FileExtension.Jar => Some(file.path)
-            case FileExtension.Tasty | FileExtension.Betasty =>
-              TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
-                case Some(classpath) => Some(classpath)
-                case _ =>
-                  report.error(em"Could not load classname from: ${file.path}")
-                  None
-            case _ =>
-              report.error(em"File extension is not `tasty` or `jar`: ${file.path}")
+    def configured: Context =
+      if ctx.settings.fromTasty.value then
+        val newEntries: List[String] = files
+          .flatMap { file =>
+            if !file.exists then
+              report.error(em"File does not exist: ${file.path}")
               None
-        }
-        .distinct
-      val ctx1 = ctx.fresh
-      val fullClassPath =
-        (newEntries :+ ctx.settings.classpath.value).mkString(java.io.File.pathSeparator)
-      ctx1.setSetting(ctx1.settings.classpath, fullClassPath)
-    else ctx
+            else file.ext match
+              case FileExtension.Jar => Some(file.path)
+              case FileExtension.Tasty | FileExtension.Betasty =>
+                TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
+                  case Some(classpath) => Some(classpath)
+                  case _ =>
+                    report.error(em"Could not load classname from: ${file.path}")
+                    None
+              case _ =>
+                report.error(em"File extension is not `tasty` or `jar`: ${file.path}")
+                None
+          }
+          .distinct
+        val ctx1 = ctx.fresh
+        val fullClassPath =
+          (newEntries :+ ctx.settings.classpath.value).mkString(platformDependent(java.io.File.pathSeparator)(":"))
+        ctx1.setSetting(ctx1.settings.classpath, fullClassPath)
+      else ctx
+    platformDependent(configured)(configured)
 
   /** Entry point to the compiler that can be conveniently used with Java reflection.
    *
@@ -214,11 +230,16 @@ class Driver {
         rootCtx.reporter
   }
 
-  def main(args: Array[String]): Unit = {
+  protected final def mainResult(args: Array[String]): Int = {
     // Preload scala.util.control.NonFatal. Otherwise, when trying to catch a StackOverflowError,
     // we may try to load it but fail with another StackOverflowError and lose the original exception,
     // see <https://groups.google.com/forum/#!topic/scala-user/kte6nak-zPM>.
     val _ = NonFatal
-    sys.exit(if (process(args).hasErrors) 1 else 0)
+    if (process(args).hasErrors) 1 else 0
   }
+
+  def main(args: Array[String]): Unit = {
+    sys.exit(mainResult(args))
+  }
+
 }

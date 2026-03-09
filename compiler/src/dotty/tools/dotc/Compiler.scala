@@ -9,11 +9,17 @@ import Phases.Phase
 import transform.*
 import backend.jvm.GenBCode
 import localopt.{StringInterpolatorOpt, DropForMap}
+import util.PlatformDependent.platformDependent
 
 /** The central class of the dotc compiler. The job of a compiler is to create
  *  runs, which process given `phases` in a given `rootContext`.
  */
 class Compiler {
+  private transparent inline def jvmOnlyPhases(inline jvm: List[List[Phase]]): List[List[Phase]] =
+    platformDependent(jvm)(Nil)
+
+  private transparent inline def platformPhaseGroup(inline jvm: List[Phase], inline js: List[Phase]): List[List[Phase]] =
+    List(platformDependent(jvm)(js))
 
   /** Meta-ordering constraint:
    *
@@ -37,8 +43,11 @@ class Compiler {
          CheckUnused.PostTyper(),   // Check for unused
          CheckShadowing()) ::       // Check for shadowed elements
     List(new YCheckPositions) ::    // YCheck positions
-    List(new sbt.ExtractDependencies) :: // Sends information on classes' dependencies to sbt via callbacks
-    List(new semanticdb.ExtractSemanticInfo) :: // Extract info into .semanticdb files
+    jvmOnlyPhases(
+      List(new sbt.ExtractDependencies) :: // Sends information on classes' dependencies to sbt via callbacks
+      List(new semanticdb.ExtractSemanticInfo) :: // Extract info into .semanticdb files
+      Nil
+    ) :::
     List(new PostTyper) ::          // Additional checks and cleanups after type checking
     List(new UnrollDefinitions) ::  // Unroll annotated methods if detected in PostTyper
     List(new sjs.PrepJSInterop) ::  // Additional checks and transformations for Scala.js (Scala.js only)
@@ -48,7 +57,7 @@ class Compiler {
   /** Phases dealing with TASTY tree pickling and unpickling */
   protected def picklerPhases: List[List[Phase]] =
     List(new Pickler) ::            // Generate TASTY info
-    List(new sbt.ExtractAPI) ::     // Sends a representation of the API of classes to sbt via callbacks
+    jvmOnlyPhases(List(new sbt.ExtractAPI) :: Nil) ::: // Sends a representation of the API of classes to sbt via callbacks
     List(new Inlining) ::           // Inline and execute macros
     List(new PostInlining) ::       // Add mirror support for inlined code
     List(new Staging) ::            // Check staging levels and heal staged types
@@ -58,7 +67,7 @@ class Compiler {
 
   /** Phases dealing with the transformation from pickled trees to backend trees */
   protected def transformPhases: List[List[Phase]] =
-    List(new InstrumentCoverage) ::  // Perform instrumentation for code coverage (if -coverage-out is set)
+    jvmOnlyPhases(List(new InstrumentCoverage) :: Nil) ::: // Perform instrumentation for code coverage (if -coverage-out is set)
     List(new CrossVersionChecks,     // Check issues related to deprecated and experimental
          new FirstTransform,         // Some transformations to put trees into a canonical form
          new CheckReentrant,         // Internal use only: Check that compiled program has no data races involving global vars
@@ -87,7 +96,7 @@ class Compiler {
     List(new cc.Setup) ::            // Preparations for check captures phase, enabled under captureChecking
     List(new cc.CheckCaptures) ::    // Check captures, enabled under captureChecking
     List(CheckUnused.PostPatMat()) :: // Check for unused elements and report
-    List(new semanticdb.AppendDiagnostics) :: // Attach warnings to extracted SemanticDB and write to .semanticdb file
+    jvmOnlyPhases(List(new semanticdb.AppendDiagnostics) :: Nil) ::: // Attach warnings to extracted SemanticDB and write to .semanticdb file
     List(new ElimOpaque,             // Turn opaque into normal aliases
          new sjs.ExplicitJSClasses,  // Make all JS classes explicit (Scala.js only)
          new ExplicitOuter,          // Add accessors to outer classes from nested ones.
@@ -133,25 +142,42 @@ class Compiler {
                                      // Note: in this mini-phase block scopes are incorrect. No phases that rely on scopes should be here
          new ElimStaticThis,         // Replace `this` references to static objects by global identifiers
          new CountOuterAccesses) ::  // Identify outer accessors that can be dropped
-    List(new DropOuterAccessors,     // Drop unused outer accessors
-         new DropParentRefinements,  // Drop parent refinements from a template
-         new CheckNoSuperThis,       // Check that supercalls don't contain references to `this`
-         new Flatten,                // Lift all inner classes to package scope
-         new TransformWildcards,     // Replace wildcards with default values
-         new MoveStatics,            // Move static methods from companion to the class itself
-         new ExpandPrivate,          // Widen private definitions accessed from nested classes
-         new RestoreScopes,          // Repair scopes rendered invalid by moving definitions in prior phases of the group
-         new SelectStatic,           // get rid of selects that would be compiled into GetStatic
-         new sjs.JUnitBootstrappers, // Generate JUnit-specific bootstrapper classes for Scala.js (not enabled by default)
-         new CollectEntryPoints,     // Collect all entry points and save them in the context
-         new RepeatableAnnotations) :: // Aggregate repeatable annotations
+    platformPhaseGroup(
+      List(new DropOuterAccessors,     // Drop unused outer accessors
+           new DropParentRefinements,  // Drop parent refinements from a template
+           new CheckNoSuperThis,       // Check that supercalls don't contain references to `this`
+           new Flatten,                // Lift all inner classes to package scope
+           new TransformWildcards,     // Replace wildcards with default values
+           new MoveStatics,            // Move static methods from companion to the class itself
+           new ExpandPrivate,          // Widen private definitions accessed from nested classes
+           new RestoreScopes,          // Repair scopes rendered invalid by moving definitions in prior phases of the group
+           new SelectStatic,           // get rid of selects that would be compiled into GetStatic
+           new sjs.JUnitBootstrappers, // Generate JUnit-specific bootstrapper classes for Scala.js (not enabled by default)
+           new CollectEntryPoints,     // Collect all entry points and save them in the context
+           new RepeatableAnnotations)
+    ,
+      List(new DropOuterAccessors,
+           new DropParentRefinements,
+           new CheckNoSuperThis,
+           new Flatten,
+           new TransformWildcards,
+           new MoveStatics,
+           new ExpandPrivate,
+           new RestoreScopes,
+           new SelectStatic,
+           new RepeatableAnnotations)
+    ) ::: // Aggregate repeatable annotations
     Nil
 
   /** Generate the output of the compilation */
   protected def backendPhases: List[List[Phase]] =
-    List(new backend.sjs.GenSJSIR) :: // Generate .sjsir files for Scala.js (not enabled by default)
-    List(new GenBCode) ::             // Generate JVM bytecode
-    Nil
+    platformDependent(
+      List(new backend.sjs.GenSJSIR) :: // Generate .sjsir files for Scala.js (not enabled by default)
+      List(new GenBCode) ::             // Generate JVM bytecode
+      Nil
+    )(
+      List(new backend.sjs.GenSJSIR) :: Nil
+    )
 
   // TODO: Initially 0, so that the first nextRunId call would return InitialRunId == 1
   // Changing the initial runId from 1 to 0 makes the scala2-library-bootstrap fail to compile,

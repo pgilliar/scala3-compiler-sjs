@@ -22,6 +22,7 @@ import dotty.tools.dotc.quoted.Interpreter
 
 import scala.util.control.NonFatal
 import dotty.tools.dotc.util.SrcPos
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import dotty.tools.io.AbstractFileClassLoader
 
 import scala.reflect.ClassTag
@@ -43,49 +44,59 @@ object Splicer {
    *
    *  See: `Staging`
    */
-  def splice(tree: Tree, splicePos: SrcPos, spliceExpansionPos: SrcPos, classLoader: ClassLoader)(using Context): Tree = tree match {
-    case Quote(quotedTree, Nil) => quotedTree
-    case _ =>
-      val owner = ctx.owner
-      val macroOwner = newSymbol(owner, nme.MACROkw, Macro | Synthetic, defn.AnyType, coord = tree.span)
-      try
-        val sliceContext = SpliceScope.contextWithNewSpliceScope(splicePos.sourcePos).withOwner(macroOwner)
-        inContext(sliceContext) {
-          val oldContextClassLoader = Thread.currentThread().getContextClassLoader
-          Thread.currentThread().setContextClassLoader(classLoader)
-          try {
-            val interpreter = new SpliceInterpreter(splicePos, classLoader)
+  def splice(tree: Tree, splicePos: SrcPos, spliceExpansionPos: SrcPos, classLoader: ClassLoader)(using Context): Tree =
+    platformDependent(
+      tree match {
+        case Quote(quotedTree, Nil) => quotedTree
+        case _ =>
+          val owner = ctx.owner
+          val macroOwner = newSymbol(owner, nme.MACROkw, Macro | Synthetic, defn.AnyType, coord = tree.span)
+          try
+            val sliceContext = SpliceScope.contextWithNewSpliceScope(splicePos.sourcePos).withOwner(macroOwner)
+            inContext(sliceContext) {
+              val oldContextClassLoader = Thread.currentThread().getContextClassLoader
+              Thread.currentThread().setContextClassLoader(classLoader)
+              try {
+                val interpreter = new SpliceInterpreter(splicePos, classLoader)
 
-            // Some parts of the macro are evaluated during the unpickling performed in quotedExprToTree
-            val interpretedExpr = interpreter.interpret[Quotes => scala.quoted.Expr[Any]](tree)
-            val interpretedTree = interpretedExpr.fold(tree)(macroClosure => PickledQuotes.quotedExprToTree(macroClosure(QuotesImpl())))
+                // Some parts of the macro are evaluated during the unpickling performed in quotedExprToTree
+                val interpretedExpr = interpreter.interpret[Quotes => scala.quoted.Expr[Any]](tree)
+                val interpretedTree = interpretedExpr.fold(tree)(macroClosure => PickledQuotes.quotedExprToTree(macroClosure(QuotesImpl())))
 
-            checkEscapedVariables(interpretedTree, macroOwner)
-          } finally {
-            Thread.currentThread().setContextClassLoader(oldContextClassLoader)
+                checkEscapedVariables(interpretedTree, macroOwner)
+              } finally {
+                Thread.currentThread().setContextClassLoader(oldContextClassLoader)
+              }
+            }.changeOwner(macroOwner, ctx.owner)
+          catch {
+            case ex: CompilationUnit.SuspendException =>
+              throw ex
+            case ex: scala.quoted.runtime.StopMacroExpansion =>
+              if !ctx.reporter.hasErrors then
+                report.error("Macro expansion was aborted by the macro without any errors reported. Macros should issue errors to end-users when aborting a macro expansion with StopMacroExpansion.", splicePos)
+              // errors have been emitted
+              ref(defn.Predef_undefined).withType(ErrorType(em"macro expansion was stopped"))
+            case ex: StopInterpretation =>
+              report.error(ex.msg, ex.pos)
+              ref(defn.Predef_undefined).withType(ErrorType(ex.msg))
+            case NonFatal(ex) =>
+              val msg =
+                em"""Failed to evaluate macro.
+                    |  Caused by ${ex.getClass}: ${if (ex.getMessage == null) "" else ex.getMessage}
+                    |    ${ex.getStackTrace.takeWhile(_.getClassName != "dotty.tools.dotc.transform.Splicer$").drop(1).mkString("\n    ")}
+                  """
+              report.error(msg, spliceExpansionPos)
+              ref(defn.Predef_undefined).withType(ErrorType(msg))
           }
-        }.changeOwner(macroOwner, ctx.owner)
-      catch {
-        case ex: CompilationUnit.SuspendException =>
-          throw ex
-        case ex: scala.quoted.runtime.StopMacroExpansion =>
-          if !ctx.reporter.hasErrors then
-            report.error("Macro expansion was aborted by the macro without any errors reported. Macros should issue errors to end-users when aborting a macro expansion with StopMacroExpansion.", splicePos)
-          // errors have been emitted
-          ref(defn.Predef_undefined).withType(ErrorType(em"macro expansion was stopped"))
-        case ex: StopInterpretation =>
-          report.error(ex.msg, ex.pos)
-          ref(defn.Predef_undefined).withType(ErrorType(ex.msg))
-        case NonFatal(ex) =>
-          val msg =
-            em"""Failed to evaluate macro.
-                |  Caused by ${ex.getClass}: ${if (ex.getMessage == null) "" else ex.getMessage}
-                |    ${ex.getStackTrace.takeWhile(_.getClassName != "dotty.tools.dotc.transform.Splicer$").drop(1).mkString("\n    ")}
-              """
-          report.error(msg, spliceExpansionPos)
-          ref(defn.Predef_undefined).withType(ErrorType(msg))
       }
-  }
+    )(
+      tree match
+        case Quote(quotedTree, Nil) => quotedTree
+        case _ =>
+          //TODO SJS macro
+          report.error("quoted macro expansion is not supported by scala3-compiler-sjs", spliceExpansionPos)
+          ref(defn.Predef_undefined).withType(ErrorType(em"quoted macro expansion is not supported by scala3-compiler-sjs"))
+    )
 
   /** Checks that no symbol that was generated within the macro expansion has an out of scope reference */
   def checkEscapedVariables(tree: Tree, expansionOwner: Symbol)(using Context): tree.type =

@@ -1,4 +1,4 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
 
 /** A position in a source file.
  *

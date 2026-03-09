@@ -1,4 +1,4 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
 
 /** Report errors, warnings and info messages during the compilation process
  *
