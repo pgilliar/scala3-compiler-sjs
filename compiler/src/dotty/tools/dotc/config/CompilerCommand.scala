@@ -3,6 +3,7 @@ package config
 
 import Settings.*
 import core.Contexts.*
+import util.PlatformDependent.platformDependent
 
 abstract class CompilerCommand extends CliCommand:
   type ConcreteSettings = ScalaSettings
@@ -17,7 +18,7 @@ abstract class CompilerCommand extends CliCommand:
         else if (settings.Whelp.value) wusageMessage
         else if (settings.Xhelp.value) xusageMessage
         else if (settings.Yhelp.value) yusageMessage
-        else if (settings.showPlugins.value) ctx.base.pluginDescriptions
+        else if (settings.showPlugins.value) platformDependent(ctx.base.pluginDescriptions)("Compiler plugins are not supported by scala3-compiler-sjs")
         else if (settings.XshowPhases.value) phasesMessage
         else ""
 

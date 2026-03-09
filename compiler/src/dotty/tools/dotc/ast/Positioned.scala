@@ -10,6 +10,8 @@ import core.Decorators.*
 import core.NameOps.*
 import core.Flags.{JavaDefined, ExtensionMethod}
 import core.StdNames.nme
+import util.PlatformWeakMap
+import util.PlatformDependent.platformDependent
 import ast.Trees.mods
 import annotation.constructorOnly
 import annotation.internal.sharable
@@ -38,7 +40,7 @@ abstract class Positioned(implicit @constructorOnly src: SourceFile) extends Src
       ids.nn.put(this: @unchecked, ownId)
       if ownId == debugId then
         println(s"Debug tree (id=$debugId) creation \n${this: @unchecked}\n")
-        Thread.dumpStack()
+        platformDependent(Thread.dumpStack())(())
 
   allocateId()
 
@@ -248,7 +250,7 @@ abstract class Positioned(implicit @constructorOnly src: SourceFile) extends Src
 
 object Positioned {
   @sharable private var debugId = Int.MinValue
-  @sharable private var ids: java.util.WeakHashMap[Positioned, Int] | Null = null
+  @sharable private var ids: PlatformWeakMap[Positioned, Int] | Null = null
   @sharable private var nextId: Int = 0
 
   def init(using Context): Unit =
@@ -256,5 +258,5 @@ object Positioned {
     if ids == null && ctx.settings.YshowTreeIds.value
        || debugId != ctx.settings.YdebugTreeWithId.default
     then
-      ids = java.util.WeakHashMap()
+      ids = new PlatformWeakMap
 }

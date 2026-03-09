@@ -5,6 +5,9 @@ import Contexts.*
 import Symbols.*
 
 import dotty.tools.backend.sjs.JSDefinitions
+import dotty.tools.dotc.classpath.AggregateClassPath
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
+import dotty.tools.io.ClassPath
 
 object SJSPlatform {
   /** The `SJSPlatform` for the current context. */
@@ -12,7 +15,45 @@ object SJSPlatform {
     ctx.platform.asInstanceOf[SJSPlatform]
 }
 
-class SJSPlatform extends JavaPlatform {
+class SJSPlatform()(using Context) extends JavaPlatform {
+  private var sjsCurrentClassPath: Option[ClassPath] = None
+
+  private def sjsClassPath: ClassPath =
+    sjsCurrentClassPath.getOrElse {
+      val cp = AggregateClassPath(Nil)
+      sjsCurrentClassPath = Some(cp)
+      cp
+    }
+
+  override def classPath(using Context): ClassPath =
+    platformDependent(super.classPath)(sjsClassPath)
+
+  override def addToClassPath(cPath: ClassPath)(using Context): Unit =
+    val _ = platformDependent(
+      { super.addToClassPath(cPath); () }
+    )(
+      {
+        sjsCurrentClassPath = Some(sjsClassPath match
+          case AggregateClassPath(entries) => AggregateClassPath(entries :+ cPath)
+          case cp => AggregateClassPath(cp :: cPath :: Nil)
+        )
+      }
+    )
+
+  override def updateClassPath(subst: Map[ClassPath, ClassPath]): Unit =
+    val _ = platformDependent(
+      { super.updateClassPath(subst); () }
+    )(
+      {
+        sjsCurrentClassPath = Some(sjsClassPath match
+          case AggregateClassPath(entries) => AggregateClassPath(entries.map(e => subst.getOrElse(e, e)))
+          case cp => subst.getOrElse(cp, cp)
+        )
+      }
+    )
+
+  override def rootLoader(root: TermSymbol)(using Context): SymbolLoader =
+    new SymbolLoaders.PackageLoader(root, classPath)
 
   /** Scala.js-specific definitions. */
   val jsDefinitions: JSDefinitions = new JSDefinitions()

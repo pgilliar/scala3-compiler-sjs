@@ -5,6 +5,8 @@ import core.*, Contexts.*, Flags.*, Symbols.*, Decorators.*
 import config.Feature.sourceVersion, config.{MigrationVersion, SourceVersion}
 import reporting.*, Diagnostic.*
 import util.{SourcePosition, NoSourcePosition, SrcPos}
+import util.PlatformDependent.platformDependent
+import util.DebugTrace
 
 import java.lang.System.currentTimeMillis
 
@@ -70,7 +72,7 @@ object report:
   def error(msg: Message, pos: SrcPos = NoSourcePosition)(using Context): Unit =
     val fullPos = addInlineds(pos)
     ctx.reporter.report(Error(msg, fullPos))
-    if ctx.settings.YdebugError.value then Thread.dumpStack()
+    if ctx.settings.YdebugError.value then DebugTrace.dumpCurrentStack()
 
   def error(msg: => String, pos: SrcPos)(using Context): Unit =
     error(msg.toMessage, pos)
@@ -81,15 +83,14 @@ object report:
   def error(ex: TypeError, pos: SrcPos)(using Context): Unit =
     val fullPos = addInlineds(pos)
     ctx.reporter.report(new StickyError(ex.toMessage, fullPos))
-    if ctx.settings.YdebugError.value then Thread.dumpStack()
-    if ctx.settings.YdebugTypeError.value then ex.printStackTrace()
+    if ctx.settings.YdebugError.value then DebugTrace.dumpCurrentStack()
+    if ctx.settings.YdebugTypeError.value then DebugTrace.printThrowable(ex)
 
   def bestEffortError(ex: Throwable, msg: String)(using Context): Unit =
-    val stackTrace =
-      Option(ex.getStackTrace()).map { st =>
-        if st.isEmpty then ""
-        else s"Stack trace: \n ${st.mkString("\n ")}".stripMargin
-      }.getOrElse("")
+    val stackTrace = DebugTrace.stackTraceString(ex)
+    val stackTraceMsg =
+      if stackTrace.isBlank then ""
+      else s"Stack trace:\n ${stackTrace.replace("\n", "\n ")}"
     // Build tools and dotty's test framework may check precisely for
     // "Unsuccessful best-effort compilation." error text.
     val fullMsg =
@@ -97,7 +98,7 @@ object report:
           |${msg}
           |Cause:
           | ${ex.toString.replace("\n", "\n ")}
-          |${stackTrace}"""
+          |${stackTraceMsg}"""
     ctx.reporter.report(Error(fullMsg, NoSourcePosition))
 
   def errorOrMigrationWarning(msg: Message, pos: SrcPos, migrationVersion: MigrationVersion)(using Context): Unit =
@@ -162,11 +163,14 @@ object report:
     val settings = ctx.settings.userSetSettings(ctx.settingsState).sortBy(_.name)
     def showSetting(s: Setting[?]): String = if s.value == "" then s"${s.name} \"\"" else s"${s.name} ${s.value}"
 
+    val libraryVersion =
+      platformDependent(scala.util.Properties.versionString)("scala.js stdlib")
+
     val info1 = formatExplain(List(
       "while compiling"    -> ctx.compilationUnit,
       "during phase"       -> ctx.phase.megaPhase,
       "mode"               -> ctx.mode,
-      "library version"    -> scala.util.Properties.versionString,
+      "library version"    -> libraryVersion,
       "compiler version"   -> dotty.tools.dotc.config.Properties.versionString,
       "settings"           -> settings.map(showSetting).mkString(" "),
     ))

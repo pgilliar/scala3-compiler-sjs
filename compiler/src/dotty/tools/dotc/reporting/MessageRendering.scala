@@ -333,9 +333,9 @@ trait MessageRendering {
 
   private def hl(str: String)(using Context, Level): String =
     summon[Level].value match
-      case interfaces.Diagnostic.ERROR   => Red(str).show
-      case interfaces.Diagnostic.WARNING => Yellow(str).show
-      case interfaces.Diagnostic.INFO    => Blue(str).show
+      case ERROR   => Red(str).show
+      case WARNING => Yellow(str).show
+      case INFO    => Blue(str).show
 
   private def diagnosticLevel(dia: Diagnostic): String =
     dia match {
@@ -344,9 +344,9 @@ trait MessageRendering {
       case dia: UncheckedWarning => "Unchecked Warning"
       case dia: MigrationWarning => "Migration Warning"
       case _ => dia.level match // Diagnostic isn't sealed (e.g. created in the REPL) so provide a fallback
-        case interfaces.Diagnostic.ERROR   => "Error"
-        case interfaces.Diagnostic.WARNING => "Warning"
-        case interfaces.Diagnostic.INFO    => "Info"
+        case ERROR   => "Error"
+        case WARNING => "Warning"
+        case INFO    => "Info"
     }
 
 }

@@ -151,7 +151,7 @@ private[semanticdb] object ExtractSemanticDB:
 
   /** Output directory for SemanticDB files */
   private def semanticdbOutDir(using Context): Path =
-    semanticdbTarget.getOrElse(outputDirectory.jpath)
+    semanticdbTarget.getOrElse(Paths.get(outputDirectory.path))
 
   private def absolutePath(path: Path): Path = path.toAbsolutePath.normalize
 
@@ -169,8 +169,8 @@ private[semanticdb] object ExtractSemanticDB:
       schema = Schema.SEMANTICDB4,
       language = Language.SCALA,
       uri = Tools.mkURIstring(Paths.get(relPath(source, sourceRoot))),
-      text = if semanticdbText then String(source.content) else "",
-      md5 = internal.MD5.compute(String(source.content)),
+      text = if semanticdbText then String(source.content()) else "",
+      md5 = internal.MD5.compute(String(source.content())),
       symbols = symbolInfos,
       occurrences = occurrences,
       synthetics = synthetics,

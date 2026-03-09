@@ -36,8 +36,19 @@ object Formatting {
           case cs: CtxShow => cs.run
           case _           => s
 
+      private def joinSeq(seq: Seq[?], prefix: String, sep: String, suffix: String)(elemToString: Any => String)(using Context): String =
+        val sb = new StringBuilder(prefix)
+        val it = seq.iterator
+        var first = true
+        while it.hasNext do
+          if !first then sb.append(sep)
+          sb.append(elemToString(it.next()))
+          first = false
+        sb.append(suffix)
+        sb.toString
+
       def toStr(x: Shown)(using Context): String = x match
-        case seq: Seq[?] => seq.map(toStr).mkString("[", ", ", "]")
+        case seq: Seq[?] => joinSeq(seq, "[", ", ", "]")(toStr(_))
         case res         => res.tryToShow
 
     import Shown.runCtxShow
@@ -170,13 +181,24 @@ object Formatting {
   class StringFormatter(protected val sc: StringContext) {
     protected def showArg(arg: Any)(using Context): String = arg.tryToShow
 
+    private def joinSeq(seq: Seq[?], prefix: String, sep: String, suffix: String)(elemToString: Any => String)(using Context): String =
+      val sb = new StringBuilder(prefix)
+      val it = seq.iterator
+      var first = true
+      while it.hasNext do
+        if !first then sb.append(sep)
+        sb.append(elemToString(it.next()))
+        first = false
+      sb.append(suffix)
+      sb.toString
+
     private def treatArg(arg: Shown, suffix: String)(using Context): (String, String) = arg.runCtxShow match {
       case arg: Seq[?] if suffix.indexOf('%') == 0 && suffix.indexOf('%', 1) != -1 =>
         val end = suffix.indexOf('%', 1)
         val sep = StringContext.processEscapes(suffix.substring(1, end).nn)
-        (arg.mkString(sep), suffix.substring(end + 1).nn)
+        (joinSeq(arg, "", sep, "")(_.toString), suffix.substring(end + 1).nn)
       case arg: Seq[?] =>
-        (arg.map(showArg).mkString("[", ", ", "]"), suffix)
+        (joinSeq(arg, "[", ", ", "]")(showArg), suffix)
       case arg =>
         (showArg(arg), suffix)
     }

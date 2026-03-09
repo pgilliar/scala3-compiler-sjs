@@ -16,9 +16,8 @@ import ast.Trees.{LambdaTypeTree, TypeBoundsTree}
 import Trees.Literal
 import Variances.Variance
 import annotation.tailrec
-import util.SimpleIdentityMap
+import util.{SimpleIdentityMap, PlatformDependent, PlatformWeakMap}
 import util.Stats
-import java.util.WeakHashMap
 import scala.util.control.NonFatal
 import config.Config
 import reporting.*
@@ -29,6 +28,7 @@ import scala.annotation.internal.sharable
 import scala.compiletime.uninitialized
 
 object SymDenotations {
+  import PlatformDependent.platformDependent
 
   /** A sym-denotation represents the contents of a definition
    *  during a period.
@@ -2596,31 +2596,40 @@ object SymDenotations {
           if assocFiles.size == 1 then
             multi // they are all overloaded variants from the same file
           else
-            // pick the variant(s) from the youngest class file
-            val lastModDate = assocFiles.map(_.lastModified).max
-            val youngest = assocFiles.filter(_.lastModified == lastModDate)
-            val chosen = youngest.head
-            def ambiguousFilesMsg(f: AbstractFile) =
-              i"""Toplevel definition $name is defined in
-                 |  $chosen
-                 |and also in
-                 |  $f"""
-            if youngest.size > 1 then
-              throw TypeError(em"""${ambiguousFilesMsg(youngest.tail.head)}
-                                  |One of these files should be removed from the classpath.""")
+            def pickYoungestAndWarn: PreDenotation =
+              val lastModDate = assocFiles.map(_.lastModified).max
+              val youngest = assocFiles.filter(_.lastModified == lastModDate)
+              val chosen = youngest.head
+              def ambiguousFilesMsg(f: AbstractFile) =
+                i"""Toplevel definition $name is defined in
+                   |  $chosen
+                   |and also in
+                   |  $f"""
+              if youngest.size > 1 then
+                throw TypeError(em"""${ambiguousFilesMsg(youngest.tail.head)}
+                                    |One of these files should be removed from the classpath.""")
 
-            // Warn if one of the older files comes from a different container.
-            // In that case picking the youngest file is not necessarily what we want,
-            // since the older file might have been loaded from a jar earlier in the
-            // classpath.
-            def sameContainer(f: AbstractFile): Boolean =
-              try f.container == chosen.container catch case NonFatal(ex) => true
-            if !ambiguityWarningIssued then
-              for conflicting <- assocFiles.find(!sameContainer(_)) do
-                report.warning(em"""${ambiguousFilesMsg(conflicting)}
-                                   |Keeping only the definition in $chosen""")
-                ambiguityWarningIssued = true
-            multi.filterWithPredicate(_.symbol.associatedFile == chosen)
+              // Warn if one of the older files comes from a different container.
+              // In that case picking the youngest file is not necessarily what we want,
+              // since the older file might have been loaded from a jar earlier in the
+              // classpath.
+              def sameContainer(f: AbstractFile): Boolean =
+                try f.container == chosen.container catch case NonFatal(ex) => true
+              if !ambiguityWarningIssued then
+                for conflicting <- assocFiles.find(!sameContainer(_)) do
+                  report.warning(em"""${ambiguousFilesMsg(conflicting)}
+                                     |Keeping only the definition in $chosen""")
+                  ambiguityWarningIssued = true
+              multi.filterWithPredicate(_.symbol.associatedFile == chosen)
+
+            platformDependent {
+              // pick the variant(s) from the youngest class file
+              pickYoungestAndWarn
+            } {
+              val haveReliableMtimes = assocFiles.exists(_.lastModified > 0L)
+              if haveReliableMtimes then pickYoungestAndWarn
+              else multi
+            }
       end dropStale
 
       if name == nme.CONSTRUCTOR then
@@ -2949,19 +2958,16 @@ object SymDenotations {
   private abstract class InheritedCacheImpl(val createdAt: Period) extends InheritedCache {
     protected def sameGroup(p1: Phase, p2: Phase): Boolean
 
-    private var dependent: WeakHashMap[InheritedCache, Unit] | Null = null
+    private var dependent: PlatformWeakMap[InheritedCache, Unit] | Null = null
     private var checkedPeriod: Period = Nowhere
 
     protected def invalidateDependents() = {
-      if (dependent != null) {
-        val it = dependent.nn.keySet.iterator()
-        while (it.hasNext()) it.next().invalidate()
-      }
+      if (dependent != null) dependent.nn.foreachKey(_.invalidate())
       dependent = null
     }
 
     protected def addDependent(dep: InheritedCache): Unit = {
-      if (dependent == null) dependent = new WeakHashMap
+      if (dependent == null) dependent = new PlatformWeakMap
       dependent.nn.put(dep, ())
     }
 

@@ -46,5 +46,5 @@ object Location:
       s"$packageName.$className",
       classType,
       methodName,
-      source.file.absolute.jpath.nn
+      java.nio.file.Paths.get(source.file.absolute.path)
     )

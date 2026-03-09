@@ -1,4 +1,4 @@
-package dotty.tools.dotc.interfacessjs
+package dotty.tools.dotc.interfaces
 
 /** Summary of the diagnostics emitted by a Reporter.
  *

@@ -7,10 +7,10 @@ import Contexts.*
 import Symbols.*
 import Flags.*
 import SymDenotations.*
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 import Decorators.*
 import MegaPhase.*
-import java.io.File.separatorChar
 
 import ValueClasses.*
 
@@ -75,6 +75,7 @@ class ExpandPrivate extends MiniPhase with IdentityDenotTransformer { thisPhase 
       // in both cases either to the start of the path or to a file separator character.
       // TODO: should we test absolute paths instead?
       def isSimilar(p1: String, p2: String): Boolean = {
+        val separatorChar = platformDependent(java.io.File.separatorChar)('/')
         var i = p1.length - 1
         var j = p2.length - 1
         while (i >= 0 && j >= 0 && p1(i) == p2(j) && p1(i) != separatorChar) {

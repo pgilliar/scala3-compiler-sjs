@@ -22,7 +22,7 @@ import TypeErasure.ErasedValueType
 
 import dotty.tools.dotc.transform.{Erasure, ValueClasses}
 
-import dotty.tools.dotc.util.SourcePosition
+import dotty.tools.dotc.util.{PlatformDependent, SourcePosition}
 import dotty.tools.dotc.report
 
 import dotty.tools.sjs.ir
@@ -58,10 +58,12 @@ import scala.reflect.NameTransformer
 class JSCodeGen()(using genCtx: Context) {
   import JSCodeGen.*
   import tpd.*
+  import PlatformDependent.platformDependent
 
   val sjsPlatform = dotty.tools.dotc.config.SJSPlatform.sjsPlatform
   val jsdefn = JSDefinitions.jsdefn
   private val primitives = new JSPrimitives(genCtx)
+  private val jsVirtualOutputDirectory = new dotty.tools.io.VirtualDirectory("sjs-output")
 
   val positionConversions = new JSPositions()(using genCtx)
   import positionConversions.*
@@ -304,9 +306,18 @@ class JSCodeGen()(using genCtx: Context) {
        * The JVM backend performs a similar test to emit a warning for
        * conflicting top-level classes. However, it uses `toLowerCase()`
        * without argument, which is not deterministic.
-       */
+      */
       def caseInsensitiveNameOf(classDef: js.ClassDef): String =
-        classDef.name.name.nameString.toLowerCase(java.util.Locale.ENGLISH)
+        val name = classDef.name.name.nameString
+        val chars = new Array[Char](name.length)
+        var i = 0
+        while i < name.length do
+          val ch = name.charAt(i)
+          chars(i) =
+            if ch >= 'A' && ch <= 'Z' then (ch + ('a' - 'A')).toChar
+            else ch
+          i += 1
+        String(chars)
 
       val generatedCaseInsensitiveNames =
         generatedClasses.map(caseInsensitiveNameOf).toSet
@@ -325,22 +336,35 @@ class JSCodeGen()(using genCtx: Context) {
   }
 
   private def genIRFile(cunit: CompilationUnit, tree: ir.Trees.ClassDef): Unit = {
-    val outfile = getFileFor(cunit, tree.name.name, ".sjsir")
-    val output = outfile.bufferedOutput
-    try {
-      ir.Serializers.serialize(output, tree)
-    } finally {
-      output.close()
+    platformDependent {
+      val outfile = getFileFor(cunit, tree.name.name, ".sjsir")
+      val output = outfile.bufferedOutput
+      try ir.Serializers.serialize(output, tree)
+      finally output.close()
+    } {
+      val outfile = getJSFileFor(tree.name.name, ".sjsir")
+      val output = outfile.output
+      try ir.Serializers.serialize(output, tree)
+      finally output.close()
     }
   }
 
   private def getFileFor(cunit: CompilationUnit, className: ClassName,
       suffix: String): dotty.tools.io.AbstractFile = {
-    val outputDirectory = ctx.settings.outputDir.value
+    val outputDirectory: dotty.tools.io.AbstractFile = ctx.settings.outputDir.value
     val pathParts = className.nameString.split('.')
     val dir = pathParts.init.foldLeft(outputDirectory)(_.subdirectoryNamed(_))
     val filename = pathParts.last
     dir.fileNamed(filename + suffix)
+  }
+
+  private def getJSFileFor(className: ClassName, suffix: String): dotty.tools.io.VirtualFile = {
+    val pathParts = className.nameString.split('.')
+    var dir = jsVirtualOutputDirectory
+    for part <- pathParts.init do
+      dir = dir.subdirectoryNamed(part).asInstanceOf[dotty.tools.io.VirtualDirectory]
+    val filename = pathParts.last
+    dir.fileNamed(filename + suffix).asInstanceOf[dotty.tools.io.VirtualFile]
   }
 
   private def isDelambdafyTargetCandidate(sym: Symbol): Boolean =

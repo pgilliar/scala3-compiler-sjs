@@ -4,6 +4,7 @@
 package dotty.tools.dotc.classpath
 
 import dotty.tools.dotc.classpath.FileUtils.isTasty
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import dotty.tools.io.AbstractFile
 import dotty.tools.io.ClassRepresentation
 import dotty.tools.io.FileExtension
@@ -19,11 +20,14 @@ object ClassPathEntries {
 case class PackageName(dottedString: String) {
   val dirPathTrailingSlashJar: String = FileUtils.dirPathInJar(dottedString) + "/"
 
-  val dirPathTrailingSlash: String =
-    if (java.io.File.separatorChar == '/')
+  val dirPathTrailingSlash: String = platformDependent(
+    if java.io.File.separatorChar == '/' then
       dirPathTrailingSlashJar
     else
       FileUtils.dirPath(dottedString) + java.io.File.separator
+  )(
+    dirPathTrailingSlashJar
+  )
 
   def isRoot: Boolean = dottedString.isEmpty
 

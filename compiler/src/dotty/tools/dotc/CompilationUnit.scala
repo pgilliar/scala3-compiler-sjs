@@ -14,6 +14,7 @@ import ast.Trees.{Import, Ident}
 import typer.Nullables
 import core.Decorators.*
 import config.{SourceVersion, Feature}
+import util.PlatformDependent.platformDependent
 import scala.annotation.internal.sharable
 import scala.util.control.NoStackTrace
 import transform.MacroAnnotations.isMacroAnnotation
@@ -175,7 +176,7 @@ object CompilationUnit {
    *  If `mustExist` is true, this will fail if `source` does not exist.
    */
   def apply(source: SourceFile, mustExist: Boolean = true)(using Context): CompilationUnit = {
-    val src =
+    val src = platformDependent(
       if (!mustExist)
         source
       else if (source.file.isDirectory) {
@@ -187,7 +188,22 @@ object CompilationUnit {
         NoSource
       }
       else source
-    val info = if src.exists then CompilationUnitInfo(src.file) else null
+    )(
+      if (!mustExist)
+        source
+      else if (source.file.isDirectory) {
+        report.error(em"expected file, received directory '${source.file.path}'")
+        NoSource
+      }
+      else if (!source.file.exists) {
+        report.error(em"source file not found: ${source.file.path}")
+        NoSource
+      }
+      else source
+    )
+    val info =
+      if platformDependent(src.exists)(true) then CompilationUnitInfo(src.file)
+      else null
     new CompilationUnit(src, info)
   }
 

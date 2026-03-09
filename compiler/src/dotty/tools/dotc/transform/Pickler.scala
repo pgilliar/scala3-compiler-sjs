@@ -29,6 +29,7 @@ import dotty.tools.io.FileWriters.{EagerReporter, BufferingReporter}
 import dotty.tools.dotc.sbt.interfaces.IncrementalCallback
 import dotty.tools.dotc.sbt.asyncZincPhasesCompleted
 import dotty.tools.dotc.util.chaining.*
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 import java.util.concurrent.atomic.AtomicBoolean
@@ -401,25 +402,61 @@ class Pickler extends Phase {
         finally executor.close()
       else
         runPhase(_())
-    if ctx.settings.YtestPickler.value then
-      val ctx2 = ctx.fresh
-        .setSetting(ctx.settings.XreadComments, true)
-        .setSetting(ctx.settings.YshowPrintErrors, true)
-      testUnpickler(
-        using ctx2
-          .setPeriod(Period(ctx.runId + 1, ctx.base.typerPhase.id))
-          .setReporter(new ThrowingReporter(ctx.reporter))
-          .addMode(Mode.ReadPositions)
-      )
-    if ctx.isBestEffort then
-      val outpath =
-        ctx.settings.outputDir.value.jpath.nn.toAbsolutePath.normalize
-          .resolve("META-INF")
-          .resolve("best-effort")
-      Files.createDirectories(outpath)
-      BestEffortTastyWriter.write(outpath, result)
+    val _ = platformDependent[Unit](
+      if ctx.settings.YtestPickler.value then
+        val ctx2 = ctx.fresh
+          .setSetting(ctx.settings.XreadComments, true)
+          .setSetting(ctx.settings.YshowPrintErrors, true)
+        testUnpickler(
+          using ctx2
+            .setPeriod(Period(ctx.runId + 1, ctx.base.typerPhase.id))
+            .setReporter(new ThrowingReporter(ctx.reporter))
+            .addMode(Mode.ReadPositions)
+        )
+    )(
+      if ctx.settings.YtestPickler.value then
+        report.warning(em"`-Ytest-pickler` self-tests are not supported by scala3-compiler-sjs; skipping.")
+    )
+    val _ = platformDependent[Unit](
+      if ctx.isBestEffort then
+        val outpath =
+          java.nio.file.Paths.get(ctx.settings.outputDir.value.path).toAbsolutePath.normalize
+            .resolve("META-INF")
+            .resolve("best-effort")
+        Files.createDirectories(outpath)
+        BestEffortTastyWriter.write(outpath, result)
+    )(
+      if ctx.isBestEffort then
+        writeBestEffortTastyJS(result)
+    )
     result
   }
+
+  private def writeBestEffortTastyJS(units: List[CompilationUnit])(using Context): Unit =
+    val outputRoot = ctx.settings.outputDir.value
+    if outputRoot == null || !outputRoot.isDirectory then
+      report.warning(em"Skipping -Ybest-effort output: output directory is unavailable.")
+    else
+      def outputFile(parts: List[String], acc: AbstractFile): AbstractFile = parts match
+        case Nil => throw new Exception("Invalid class name")
+        case last :: Nil =>
+          val name = last.stripSuffix("$")
+          acc.fileNamed(s"$name.betasty")
+        case pkg :: tail =>
+          outputFile(tail, acc.subdirectoryNamed(pkg))
+
+      units.foreach: unit =>
+        unit.pickled.foreach: (clz, binary) =>
+          val parts = clz.fullName.mangledString.split('.').toList
+          val root = outputRoot.subdirectoryNamed("META-INF").subdirectoryNamed("best-effort")
+          val outFile = outputFile(parts, root)
+          try
+            val out = outFile.output
+            try out.write(binary())
+            finally out.close()
+          catch
+            case NonFatal(t) =>
+              report.error(em"Error writing best-effort TASTy output for $clz: ${t.getMessage}")
 
   private def testUnpickler(using Context): Unit =
     pickling.println(i"testing unpickler at run ${ctx.runId}")
@@ -491,12 +528,15 @@ class Pickler extends Phase {
     Option.when(!matches(actualLines, expectLines))(actualLines)
 
   private def matches(actual: String, expect: String): Boolean = {
-    import java.io.File
     val actual1 = actual.stripLineEnd
     val expect1  = expect.stripLineEnd
 
     // handle check file path mismatch on windows
-    actual1 == expect1 || File.separatorChar == '\\' && actual1.replace('\\', '/') == expect1
+    actual1 == expect1 || platformDependent(
+      java.io.File.separatorChar == '\\' && actual1.replace('\\', '/') == expect1
+    )(
+      false
+    )
   }
 
   private def matches(actual: Seq[String], expect: Seq[String]): Boolean = {

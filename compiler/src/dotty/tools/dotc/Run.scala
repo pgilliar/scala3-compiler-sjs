@@ -39,6 +39,7 @@ import scala.compiletime.uninitialized
 import dotty.tools.dotc.transform.MegaPhase
 import dotty.tools.dotc.transform.Pickler.AsyncTastyHolder
 import dotty.tools.dotc.util.chaining.*
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import java.util.{Timer, TimerTask}
 
 /** A compiler run. Exports various methods to compile source files */
@@ -353,7 +354,7 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
     val runCtx = ctx.fresh
     runCtx.setProfiler(Profiler())
 
-    val pluginPlan = ctx.base.addPluginPhases(ctx.base.phasePlan)
+    val pluginPlan = platformDependent(ctx.base.addPluginPhases(ctx.base.phasePlan))(ctx.base.phasePlan)
     val phases = ctx.base.fusePhases(pluginPlan,
       ctx.settings.Yskip.value, ctx.settings.YstopBefore.value, stopAfter, ctx.settings.Ycheck.value)
     ctx.base.usePhases(phases, runCtx)
@@ -413,9 +414,13 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
     runCtx.withProgressCallback: cb =>
       _progress = Progress(cb, this, fusedPhases.map(_.traversals).sum)
     val cancelAsyncTasty: () => Unit =
-      if !myAsyncTastyWritten && Phases.picklerPhase.exists && !ctx.settings.XearlyTastyOutput.isDefault then
-        initializeAsyncTasty()
-      else () => {}
+      platformDependent(
+        if !myAsyncTastyWritten && Phases.picklerPhase.exists && !ctx.settings.XearlyTastyOutput.isDefault then
+          initializeAsyncTasty()
+        else () => {}
+      )(
+        () => {}
+      )
 
     showProgress(runPhases(allPhases = fusedPhases)(using runCtx))
     cancelAsyncTasty()

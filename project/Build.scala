@@ -562,6 +562,7 @@ object Build {
 
   lazy val `scala3-interfaces-sjs` = project.in(file("interfaces-sjs"))
   .dependsOn(`scala3-library-sjs`)
+  .enablePlugins(DottyJSPlugin, ScalaJSPlugin)
   .settings(publishSettings)
   .settings(commonMiMaSettings)
   .settings(
@@ -1781,7 +1782,7 @@ object Build {
     )
 
     /* Configuration of the org.scala-lang:scala3-compiler_3:*.**.**-sjs project */
-  lazy val `scala3-compiler-sjs` = project.in(file("compiler-sjs"))
+  lazy val `scala3-compiler-sjs` = project.in(file("compiler"))
     .dependsOn(`scala3-interfaces-sjs`, `scala3-library-sjs`)
     .enablePlugins(DottyJSPlugin, ScalaJSPlugin)
     .settings(publishSettings)
@@ -1817,9 +1818,57 @@ object Build {
       Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
       Compile / unmanagedSourceDirectories += (`tasty-core-bootstrapped` / baseDirectory).value / "src",
       Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
+      Compile / unmanagedSources ~= { sources =>
+        sources.filterNot { source =>
+          val path = source.getPath.replace('\\', '/')
+          path.endsWith("/src/dotty/tools/io/package.scala") ||
+          path.endsWith("/src/dotty/tools/io/Path.scala") ||
+          path.endsWith("/src/dotty/tools/io/File.scala") ||
+          path.endsWith("/src/dotty/tools/io/Directory.scala") ||
+          path.endsWith("/src/dotty/tools/io/PlainFile.scala") ||
+          path.endsWith("/src/dotty/tools/io/AbstractFile.scala") ||
+          path.endsWith("/src/dotty/tools/io/ClassPath.scala") ||
+          path.endsWith("/src/dotty/tools/io/JarArchive.scala") ||
+          path.endsWith("/src/dotty/tools/io/Jar.scala") ||
+          path.endsWith("/src/dotty/tools/io/FileWriters.scala") ||
+          path.endsWith("/src/dotty/tools/io/ZipArchive.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/classpath/ClassPathFactory.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/classpath/DirectoryClassPath.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/classpath/ZipArchiveFileLookup.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/classpath/ZipAndJarFileLookupFactory.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/config/CommandLineParser.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/config/PathResolver.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/config/Properties.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/decompiler/Main.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/fromtasty/Debug.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/interactive/InteractiveDriver.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/sbt/ExtractDependencies.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/sbt/ExtractAPI.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/sbt/package.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/sbt/interfaces/IncrementalCallback.java") ||
+          path.endsWith("/src/dotty/tools/dotc/sbt/interfaces/ProgressCallback.java") ||
+          path.endsWith("/src/dotty/tools/scripting/Main.scala") ||
+          path.endsWith("/src/dotty/tools/scripting/ScriptingDriver.scala") ||
+          path.endsWith("/src/dotty/tools/scripting/StringDriver.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/util/PlatformDependent.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/util/PlatformRef.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/util/PlatformWeakMap.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/util/concurrent.scala") ||
+          path.endsWith("/src/dotty/tools/dotc/util/WeakHashSet.scala") ||
+          (path.contains("/src/dotty/tools/backend/jvm/") &&
+            !path.endsWith("/src/dotty/tools/backend/jvm/DottyBackendInterface.scala") &&
+            !path.endsWith("/src/dotty/tools/backend/jvm/DottyPrimitives.scala"))
+        }
+      },
+      Compile / managedSources ~= { sources =>
+        sources.filterNot { source =>
+          val path = source.getPath.replace('\\', '/')
+          path.endsWith("/scalajs-ir-src/org/scalajs/ir/SHA1.scala")
+        }
+      },
       Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
       // Specify the default entry point of the compiler
-      Compile / mainClass := Some("dotty.tools.dotc.Main"),
+      Compile / mainClass := Some("dotty.tools.dotc.MainJS"),
       scalaJSUseMainModuleInitializer := true,
       // Add entry's to the MANIFEST
       packageOptions += ManifestAttributes(("Git-Hash", VersionUtil.gitHash)), // Used by the REPL
