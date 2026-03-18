@@ -92,7 +92,7 @@ object SourcePosition:
 end SourcePosition
 
 /** A sentinel for a non-existing source position */
-@sharable object NoSourcePosition extends SourcePosition(NoSource, NoSpan) {
+@sharable object NoSourcePosition extends SourcePosition(NoSource, NoSpan, null.asInstanceOf[SourcePosition]) {
   override def line: Int = -1
   override def column: Int = -1
   override def toString: String = "?"

@@ -18,9 +18,9 @@ object SJSPlatform {
 class SJSPlatform()(using Context) extends JavaPlatform {
   private var sjsCurrentClassPath: Option[ClassPath] = None
 
-  private def sjsClassPath: ClassPath =
+  private def sjsClassPath(using Context): ClassPath =
     sjsCurrentClassPath.getOrElse {
-      val cp = AggregateClassPath(Nil)
+      val cp = new PathResolver().result
       sjsCurrentClassPath = Some(cp)
       cp
     }

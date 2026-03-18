@@ -4,7 +4,6 @@ package core
 
 import Periods.*
 import Contexts.*
-import dotty.tools.backend.jvm.GenBCode
 import DenotTransformers.*
 import Denotations.*
 import Decorators.*
@@ -296,6 +295,7 @@ object Phases {
 
     private def setSpecificPhases() = {
       def phaseOfClass(pclass: Class[?]) = phases.find(pclass.isInstance).getOrElse(NoPhase)
+      def phaseNamed(name: String) = phases.find(_.phaseName == name).getOrElse(NoPhase)
 
       myParserPhase = phaseOfClass(classOf[Parser])
       myTyperPhase = phaseOfClass(classOf[TyperPhase])
@@ -323,7 +323,7 @@ object Phases {
       myFlattenPhase = phaseOfClass(classOf[Flatten])
       myExplicitOuterPhase = phaseOfClass(classOf[ExplicitOuter])
       myGettersPhase = phaseOfClass(classOf[Getters])
-      myGenBCodePhase = phaseOfClass(classOf[GenBCode])
+      myGenBCodePhase = phaseNamed("genBCode")
       myCheckCapturesPhase = phaseOfClass(classOf[CheckCaptures])
     }
 

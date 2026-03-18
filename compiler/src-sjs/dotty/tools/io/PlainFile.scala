@@ -12,7 +12,6 @@ import java.io.{InputStream, OutputStream}
 /** This class implements an abstract file backed by a File. */
 class PlainDirectory(givenPath: Directory) extends PlainFile(givenPath) {
   override val isDirectory: Boolean = true
-  override def iterator: Iterator[PlainFile] = Iterator.empty
 }
 
 class PlainFile(val givenPath: Path) extends AbstractFile {

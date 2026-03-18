@@ -10,6 +10,9 @@ import java.net.{URI, URL}
 case class VirtualDirectoryClassPath(dir: VirtualDirectory) extends ClassPath with DirectoryLookup[BinaryFileEntry] with NoSourcePaths {
   type F = AbstractFile
 
+  private def splitPath(path: String): IndexedSeq[String] =
+    path.split("[/\\\\]+").iterator.filter(_.nonEmpty).toIndexedSeq
+
   // From AbstractFileClassLoader
   private final def lookupPath(base: AbstractFile)(pathParts: Seq[String], directory: Boolean): AbstractFile | Null = {
     var file: AbstractFile | Null = base
@@ -25,7 +28,9 @@ case class VirtualDirectoryClassPath(dir: VirtualDirectory) extends ClassPath wi
 
   protected def emptyFiles: Array[AbstractFile] = Array.empty
   protected def getSubDir(packageDirName: String): Option[AbstractFile] =
-    Option(lookupPath(dir)(packageDirName.split(java.io.File.separator).toIndexedSeq, directory = true))
+    val parts = splitPath(packageDirName)
+    if parts.isEmpty then Some(dir)
+    else Option(lookupPath(dir)(parts, directory = true))
   protected def listChildren(dir: AbstractFile, filter: Option[AbstractFile => Boolean] = None): Array[F] = filter match {
     case Some(f) => dir.iterator.filter(f).toArray
     case _ => dir.toArray
@@ -39,7 +44,7 @@ case class VirtualDirectoryClassPath(dir: VirtualDirectory) extends ClassPath wi
   def asClassPathStrings: Seq[String] = Seq(dir.path)
 
   def findClassFile(className: String): Option[AbstractFile] = {
-    val pathSeq = FileUtils.dirPath(className).split(java.io.File.separator)
+    val pathSeq = splitPath(FileUtils.dirPathInJar(className))
     val parentDir = lookupPath(dir)(pathSeq.init.toSeq, directory = true)
     if parentDir == null then None
     else

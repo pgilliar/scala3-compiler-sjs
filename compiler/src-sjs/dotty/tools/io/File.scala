@@ -1,11 +1,3 @@
-/*                     __                                               *\
-**     ________ ___   / /  ___     Scala API                            **
-**    / __/ __// _ | / /  / _ |    (c) 2003-2013, LAMP/EPFL             **
-**  __\ \/ /__/ __ |/ /__/ __ |    http://scala-lang.org/               **
-** /____/\___/_/ |_/____/_/ | |                                         **
-**                          |/                                          **
-\*                                                                      */
-
 package dotty.tools.io
 
 import java.io.*
@@ -15,7 +7,9 @@ import scala.io.Codec
 
 /** An abstraction for files.  For character data, a Codec can be supplied. */
 object File {
-  def pathSeparator: String = "/"
+  def pathSeparator: String =
+    val osName = Option(System.getProperty("os.name")).getOrElse("")
+    if osName.startsWith("Windows") then ";" else ":"
   def separator: String = "/"
 
   def apply(path: String)(implicit codec: Codec): File = apply(JSPath(path))(codec)

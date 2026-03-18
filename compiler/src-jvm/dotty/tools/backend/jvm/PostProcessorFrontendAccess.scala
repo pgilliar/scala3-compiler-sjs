@@ -1,7 +1,6 @@
 package dotty.tools
 package backend.jvm
 
-import scala.collection.mutable.HashSet
 import dotty.tools.io.AbstractFile
 
 import dotty.tools.dotc.core.Contexts.*
@@ -88,7 +87,7 @@ object PostProcessorFrontendAccess {
     def outputOnlyTasty: Boolean
   }
 
-  class Impl(entryPoints: mutable.HashSet[String])(ctx: FreshContext) extends PostProcessorFrontendAccess(ctx) {
+  class Impl(entryPoints: mutable.Set[String])(ctx: FreshContext) extends PostProcessorFrontendAccess(ctx) {
     override def compilerSettings: CompilerSettings = _compilerSettings.get
     private lazy val _compilerSettings: Lazy[CompilerSettings] = perRunLazy(buildCompilerSettings)(using ctx)
 
