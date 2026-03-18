@@ -7,7 +7,6 @@ import typer.{TyperPhase, RefChecks}
 import parsing.Parser
 import Phases.Phase
 import transform.*
-import backend.jvm.GenBCode
 import localopt.{StringInterpolatorOpt, DropForMap}
 import util.PlatformDependent.platformDependent
 
@@ -171,13 +170,7 @@ class Compiler {
 
   /** Generate the output of the compilation */
   protected def backendPhases: List[List[Phase]] =
-    platformDependent(
-      List(new backend.sjs.GenSJSIR) :: // Generate .sjsir files for Scala.js (not enabled by default)
-      List(new GenBCode) ::             // Generate JVM bytecode
-      Nil
-    )(
-      List(new backend.sjs.GenSJSIR) :: Nil
-    )
+    PlatformBackendPhases.backendPhases
 
   // TODO: Initially 0, so that the first nextRunId call would return InitialRunId == 1
   // Changing the initial runId from 1 to 0 makes the scala2-library-bootstrap fail to compile,

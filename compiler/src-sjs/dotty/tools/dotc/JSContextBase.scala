@@ -6,6 +6,7 @@ import config.SJSPlatform
 import core.Contexts.Context
 import core.Contexts.ContextBase
 import core.Phases.Phase
+import reporting.ConsoleReporter
 import reporting.Reporter
 
 final class JSContextBase extends ContextBase:
@@ -13,7 +14,7 @@ final class JSContextBase extends ContextBase:
     new SJSPlatform
 
   override protected[dotc] def initialReporter: Reporter =
-    Reporter.NoReporter
+    new ConsoleReporter()
 
   override def addPluginPhases(plan: List[List[Phase]])(using Context): List[List[Phase]] =
     plan

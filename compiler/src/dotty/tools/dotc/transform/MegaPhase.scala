@@ -516,7 +516,6 @@ class MegaPhase(val miniPhases: Array[MiniPhase]) extends Phase {
         }
       hasRedefinedMethod(phase.getClass)
     } {
-      // TODO SJS: need reflection-free override detection
       true
     }
   }

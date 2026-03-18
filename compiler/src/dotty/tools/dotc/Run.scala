@@ -206,6 +206,15 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
   /** The source files of all late entered symbols, as a set */
   private val lateFiles = mutable.Set[AbstractFile]()
 
+  /** Main classes discovered for the current run when compiling to a jar. */
+  private val myEntryPoints = mutable.HashSet.empty[String]
+
+  private[tools] def registerEntryPoint(mainClass: String): Unit =
+    myEntryPoints += mainClass
+
+  private[tools] def entryPoints: mutable.Set[String] =
+    myEntryPoints
+
   /** A cache for static references to packages and classes */
   val staticRefs = util.EqHashMap[Name, Denotation](initialCapacity = 1024)
 

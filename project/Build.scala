@@ -41,7 +41,9 @@ import sbtbuildinfo.BuildInfoPlugin.autoImport._
 import sbttastymima.TastyMiMaPlugin
 import sbttastymima.TastyMiMaPlugin.autoImport._
 
+import scala.jdk.CollectionConverters._
 import scala.util.Properties.isJavaAtLeast
+import scala.util.control.NonFatal
 
 import scala.xml.{Node => XmlNode, NodeSeq => XmlNodeSeq, _}
 import scala.xml.transform.{RewriteRule, RuleTransformer}
@@ -173,6 +175,8 @@ object Build {
   val ideTestsScalaJSClasspath = taskKey[Seq[File]]("Scala.js dependency classpath to use in IDE tests")
 
   val fetchScalaJSSource = taskKey[File]("Fetch the sources of Scala.js")
+  val bundleSjsCompilerLibs = taskKey[File]("Bundle the libraries required by the Node-hosted scala3-compiler-sjs hello world test")
+  val sjsHelloWorldTest = taskKey[Unit]("Compile, link, and run HelloWorld.scala with scala3-compiler-sjs under Node.js using rt.jar on the compiler classpath")
 
   lazy val SourceDeps = config("sourcedeps")
 
@@ -1544,6 +1548,7 @@ object Build {
       autoScalaLibrary := false,
       // Add the source directories for the compiler (non-boostrapped)
       Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
+      Compile / unmanagedSourceDirectories   += baseDirectory.value / "src-jvm",
       Compile / unmanagedSourceDirectories   += baseDirectory.value / "src-non-bootstrapped",
       Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
       // Add the test directories for the compiler (non-bootstrapped)
@@ -1674,6 +1679,7 @@ object Build {
       autoScalaLibrary := false,
       // Add the source directories for the compiler (boostrapped)
       Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
+      Compile / unmanagedSourceDirectories   += baseDirectory.value / "src-jvm",
       Compile / unmanagedSourceDirectories   += baseDirectory.value / "src-bootstrapped",
       Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
       // Add the test directories for the compiler (bootstrapped)
@@ -1781,7 +1787,13 @@ object Build {
       bspEnabled := enableBspAllProjects,
     )
 
-    /* Configuration of the org.scala-lang:scala3-compiler_3:*.**.**-sjs project */
+  private val sjsCompilerNodeFlags = List(
+    "--experimental-wasm-exnref",
+    "--experimental-wasm-jspi",
+    "--experimental-wasm-imported-strings",
+  )
+
+  /* Configuration of the org.scala-lang:scala3-compiler_3:*.**.**-sjs project */
   lazy val `scala3-compiler-sjs` = project.in(file("compiler"))
     .dependsOn(`scala3-interfaces-sjs`, `scala3-library-sjs`)
     .enablePlugins(DottyJSPlugin, ScalaJSPlugin)
@@ -1795,21 +1807,15 @@ object Build {
       crossPaths    := false, // org.scala-lang:scala3-compiler has a crosspath
       // sbt shouldn't add stdlib automatically, we depend on `scala3-library-nonbootstrapped`
       autoScalaLibrary := false,
-      // WASM config
+      // The current JS-side archive handling uses JSPI/await, so the compiler
+      // itself still runs through the Scala.js Wasm backend under Node.
       scalaJSLinkerConfig := {
         scalaJSLinkerConfig.value
-          .withExperimentalUseWebAssembly(true)   // enable wasm backend
-          .withModuleKind(ModuleKind.ESModule)    // required for wasm
+          .withExperimentalUseWebAssembly(true)
+          .withModuleKind(ModuleKind.ESModule)
+          .withESFeatures(_.withESVersion(ESVersion.ES2017))
       },
-      jsEnv := {
-        val config = NodeJSEnv.Config()
-          .withArgs(List(
-            "--experimental-wasm-exnref",
-            "--experimental-wasm-jspi",
-            "--experimental-wasm-imported-strings",
-          ))
-        new NodeJSEnv(config)
-      },
+      jsEnv := new NodeJSEnv(NodeJSEnv.Config().withArgs(sjsCompilerNodeFlags)),
       libraryDependencies ++= Seq(
         "org.scala-lang.modules" % "scala-asm" % "9.9.0-scala-1",
         Dependencies.compilerInterface,
@@ -1818,48 +1824,6 @@ object Build {
       Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
       Compile / unmanagedSourceDirectories += (`tasty-core-bootstrapped` / baseDirectory).value / "src",
       Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
-      Compile / unmanagedSources ~= { sources =>
-        sources.filterNot { source =>
-          val path = source.getPath.replace('\\', '/')
-          path.endsWith("/src/dotty/tools/io/package.scala") ||
-          path.endsWith("/src/dotty/tools/io/Path.scala") ||
-          path.endsWith("/src/dotty/tools/io/File.scala") ||
-          path.endsWith("/src/dotty/tools/io/Directory.scala") ||
-          path.endsWith("/src/dotty/tools/io/PlainFile.scala") ||
-          path.endsWith("/src/dotty/tools/io/AbstractFile.scala") ||
-          path.endsWith("/src/dotty/tools/io/ClassPath.scala") ||
-          path.endsWith("/src/dotty/tools/io/JarArchive.scala") ||
-          path.endsWith("/src/dotty/tools/io/Jar.scala") ||
-          path.endsWith("/src/dotty/tools/io/FileWriters.scala") ||
-          path.endsWith("/src/dotty/tools/io/ZipArchive.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/classpath/ClassPathFactory.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/classpath/DirectoryClassPath.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/classpath/ZipArchiveFileLookup.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/classpath/ZipAndJarFileLookupFactory.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/config/CommandLineParser.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/config/PathResolver.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/config/Properties.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/decompiler/Main.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/fromtasty/Debug.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/interactive/InteractiveDriver.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/sbt/ExtractDependencies.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/sbt/ExtractAPI.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/sbt/package.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/sbt/interfaces/IncrementalCallback.java") ||
-          path.endsWith("/src/dotty/tools/dotc/sbt/interfaces/ProgressCallback.java") ||
-          path.endsWith("/src/dotty/tools/scripting/Main.scala") ||
-          path.endsWith("/src/dotty/tools/scripting/ScriptingDriver.scala") ||
-          path.endsWith("/src/dotty/tools/scripting/StringDriver.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/util/PlatformDependent.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/util/PlatformRef.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/util/PlatformWeakMap.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/util/concurrent.scala") ||
-          path.endsWith("/src/dotty/tools/dotc/util/WeakHashSet.scala") ||
-          (path.contains("/src/dotty/tools/backend/jvm/") &&
-            !path.endsWith("/src/dotty/tools/backend/jvm/DottyBackendInterface.scala") &&
-            !path.endsWith("/src/dotty/tools/backend/jvm/DottyPrimitives.scala"))
-        }
-      },
       Compile / managedSources ~= { sources =>
         sources.filterNot { source =>
           val path = source.getPath.replace('\\', '/')
@@ -1869,7 +1833,7 @@ object Build {
       Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
       // Specify the default entry point of the compiler
       Compile / mainClass := Some("dotty.tools.dotc.MainJS"),
-      scalaJSUseMainModuleInitializer := true,
+      scalaJSUseMainModuleInitializer := false,
       // Add entry's to the MANIFEST
       packageOptions += ManifestAttributes(("Git-Hash", VersionUtil.gitHash)), // Used by the REPL
       // Packaging configuration of the stdlib
@@ -1882,6 +1846,58 @@ object Build {
       target := target.value / "scala3-compiler-sjs",
       // Generate compiler.properties, used by sbt
       Compile / resourceGenerators += generateCompilerProperties.taskValue,
+      bundleSjsCompilerLibs := {
+        val s = streams.value
+        val scalaLibClasses = (`scala-library-bootstrapped` / Compile / classDirectory).value
+        val scalaLibSjsClasses = (`scala-library-sjs` / Compile / classDirectory).value
+        val _ = (`scala-library-bootstrapped` / Compile / compile).value
+        val _2 = (`scala-library-sjs` / Compile / compile).value
+
+        val report = (Compile / update).value
+        val scalaJSLibJar = report.select(
+          module = (_: ModuleID).name.startsWith("scalajs-library_")
+        ).headOption.getOrElse(sys.error("Could not find scalajs-library JAR"))
+        val scalaJSJavaLibJar = report.select(
+          module = (_: ModuleID).name == "scalajs-javalib"
+        ).headOption.getOrElse(sys.error("Could not find scalajs-javalib JAR"))
+
+        SjsCompilerHelloWorld.bundleCompilerLibs(
+          target.value,
+          scalaLibClasses,
+          scalaLibSjsClasses,
+          scalaJSLibJar,
+          scalaJSJavaLibJar,
+          s.log,
+        )
+      },
+      sjsHelloWorldTest := {
+        val s = streams.value
+        val outputDir = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+        val _2 = (Compile / fastLinkJS).value
+        val libsDir = bundleSjsCompilerLibs.value
+        val rtJar = libsDir / "rt.jar"
+
+        if (!rtJar.exists()) {
+          s.log.info(s"Extracting java.base from jrt:/ to $rtJar")
+          SjsCompilerHelloWorld.extractRTJar(rtJar)
+        }
+
+        SjsCompilerHelloWorld.runTest(
+          (ThisBuild / baseDirectory).value,
+          target.value,
+          outputDir,
+          libsDir,
+          sjsCompilerNodeFlags,
+          Seq(
+            rtJar,
+            libsDir / "scala-lib",
+            libsDir / "scalajs-lib",
+          ),
+          "sjs-hello-world-test",
+          "scala3-compiler-sjs hello world test passed",
+          s.log,
+        )
+      },
       // Configure to use the non-bootstrapped compiler
       bootstrappedScalaInstanceSettings,
       /* Add the sources of scalajs-ir.

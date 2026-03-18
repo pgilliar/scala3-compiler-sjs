@@ -63,7 +63,6 @@ class JSCodeGen()(using genCtx: Context) {
   val sjsPlatform = dotty.tools.dotc.config.SJSPlatform.sjsPlatform
   val jsdefn = JSDefinitions.jsdefn
   private val primitives = new JSPrimitives(genCtx)
-  private val jsVirtualOutputDirectory = new dotty.tools.io.VirtualDirectory("sjs-output")
 
   val positionConversions = new JSPositions()(using genCtx)
   import positionConversions.*
@@ -336,17 +335,10 @@ class JSCodeGen()(using genCtx: Context) {
   }
 
   private def genIRFile(cunit: CompilationUnit, tree: ir.Trees.ClassDef): Unit = {
-    platformDependent {
-      val outfile = getFileFor(cunit, tree.name.name, ".sjsir")
-      val output = outfile.bufferedOutput
-      try ir.Serializers.serialize(output, tree)
-      finally output.close()
-    } {
-      val outfile = getJSFileFor(tree.name.name, ".sjsir")
-      val output = outfile.output
-      try ir.Serializers.serialize(output, tree)
-      finally output.close()
-    }
+    val outfile = getFileFor(cunit, tree.name.name, ".sjsir")
+    val output = outfile.output
+    try ir.Serializers.serialize(output, tree)
+    finally output.close()
   }
 
   private def getFileFor(cunit: CompilationUnit, className: ClassName,
@@ -356,15 +348,6 @@ class JSCodeGen()(using genCtx: Context) {
     val dir = pathParts.init.foldLeft(outputDirectory)(_.subdirectoryNamed(_))
     val filename = pathParts.last
     dir.fileNamed(filename + suffix)
-  }
-
-  private def getJSFileFor(className: ClassName, suffix: String): dotty.tools.io.VirtualFile = {
-    val pathParts = className.nameString.split('.')
-    var dir = jsVirtualOutputDirectory
-    for part <- pathParts.init do
-      dir = dir.subdirectoryNamed(part).asInstanceOf[dotty.tools.io.VirtualDirectory]
-    val filename = pathParts.last
-    dir.fileNamed(filename + suffix).asInstanceOf[dotty.tools.io.VirtualFile]
   }
 
   private def isDelambdafyTargetCandidate(sym: Symbol): Boolean =

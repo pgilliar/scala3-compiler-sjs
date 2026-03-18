@@ -25,25 +25,41 @@ import java.util.Optional
 import java.util.regex.Pattern
 
 object ScriptSourceFile {
-  @sharable private val headerPattern = Pattern.compile("""^(::)?!#.*(\r|\n|\r\n)""", Pattern.MULTILINE)
   private val headerStarts  = List("#!", "::#!")
+  private val headerEnds = List("!#", "::!#")
 
   /** Return true if has a script header */
   def hasScriptHeader(content: Array[Char]): Boolean =
     headerStarts.exists(content.startsWith(_))
+
+  private def lineEnd(content: Array[Char], start: Int): Int =
+    var idx = start
+    while idx < content.length && content(idx) != '\n' && content(idx) != '\r' do
+      idx += 1
+    if idx >= content.length then idx
+    else if content(idx) == '\r' && idx + 1 < content.length && content(idx + 1) == '\n' then idx + 2
+    else idx + 1
+
+  private def startsWithAt(content: Array[Char], idx: Int, prefix: String): Boolean =
+    idx >= 0 && idx + prefix.length <= content.length && content.startsWith(prefix, idx)
+
+  private def headerLength(content: Array[Char]): Int =
+    if !hasScriptHeader(content) then 0
+    else
+      val firstLineEnd = lineEnd(content, 0)
+      var lineStart = firstLineEnd
+      while lineStart < content.length do
+        if headerEnds.exists(startsWithAt(content, lineStart, _)) then
+          return lineEnd(content, lineStart)
+        lineStart = lineEnd(content, lineStart)
+      firstLineEnd
 
   def apply(file: AbstractFile, content: Array[Char]): SourceFile = {
     /** Length of the script header from the given content, if there is one.
      *  The header begins with "#!" or "::#!" and is either a single line,
      *  or it ends with a line starting with "!#" or "::!#", if present.
      */
-    val headerLength =
-      if (headerStarts exists (content startsWith _)) {
-        val matcher = headerPattern.matcher(content.mkString)
-        if matcher.find then matcher.end
-        else content.indexOf('\n') // end of first line
-      }
-      else 0
+    val headerLength = ScriptSourceFile.headerLength(content)
 
     // overwrite hash-bang lines with all spaces to preserve line numbers
     val hashBangLines = content.take(headerLength).mkString.split("\\r?\\n")

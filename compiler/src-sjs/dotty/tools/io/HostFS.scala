@@ -4,7 +4,7 @@ package io
 import scala.language.unsafeNulls
 
 import scala.scalajs.js
-import scala.scalajs.js.annotation.{JSGlobalScope, JSName}
+import scala.scalajs.js.annotation.JSGlobal
 import scala.scalajs.js.typedarray.{ArrayBuffer, Uint8Array}
 import scala.util.control.NonFatal
 
@@ -18,20 +18,16 @@ import scala.util.control.NonFatal
   * In browser/no-host environments, methods degrade gracefully.
   */
 private[io] object HostFS:
-
   @js.native
-  @JSGlobalScope
-  private object GlobalScope extends js.Object:
-    val require: js.UndefOr[js.Dynamic] = js.native
-    val process: js.UndefOr[js.Dynamic] = js.native
-    @JSName("__scala3CompilerSJSHostFS")
-    val scala3CompilerSJSHostFS: js.UndefOr[js.Dynamic] = js.native
-
-  private def undefToNull(value: js.UndefOr[js.Dynamic]): js.Dynamic | Null =
-    value.getOrElse(null)
+  @JSGlobal("globalThis")
+  private object GlobalThis extends js.Object
 
   private def defined(value: js.Dynamic): Boolean =
     !js.isUndefined(value) && value != null
+
+  private def readGlobal(name: String): js.Dynamic | Null =
+    val value = GlobalThis.asInstanceOf[js.Dynamic].selectDynamic(name)
+    if defined(value) then value else null
 
   private def asInt(value: js.Any): Int =
     js.typeOf(value) match
@@ -46,10 +42,10 @@ private[io] object HostFS:
       case _        => 0L
 
   private def requireFn: js.Dynamic | Null =
-    val req = undefToNull(GlobalScope.require)
+    val req = readGlobal("require")
     if defined(req) && js.typeOf(req) == "function" then req
     else
-      val process = undefToNull(GlobalScope.process)
+      val process = readGlobal("process")
       if !defined(process) then null
       else
         val mainModule = process.selectDynamic("mainModule")
@@ -60,7 +56,7 @@ private[io] object HostFS:
           else null
 
   private lazy val configuredFs: js.Dynamic | Null =
-    val fs = undefToNull(GlobalScope.scala3CompilerSJSHostFS)
+    val fs = readGlobal("__scala3CompilerSJSHostFS")
     if defined(fs) then fs else null
 
   private lazy val nodeFs: js.Dynamic | Null =
@@ -90,7 +86,7 @@ private[io] object HostFS:
       try configured.asInstanceOf[js.Function0[String]]()
       catch case NonFatal(_) => "/"
     else
-      val process = undefToNull(GlobalScope.process)
+      val process = readGlobal("process")
       val processCwd =
         if defined(process) then method(process, "cwd")
         else null
@@ -118,20 +114,20 @@ private[io] object HostFS:
     val st = stat(path)
     if st == null then false
     else
-      val isFileFn = method(st, "isFile")
-      if isFileFn == null then false
+      val isFileFn = st.selectDynamic("isFile")
+      if !defined(isFileFn) || js.typeOf(isFileFn) != "function" then false
       else
-        try isFileFn.asInstanceOf[js.Function0[Boolean]]()
+        try isFileFn.asInstanceOf[js.Dynamic].applyDynamic("call")(st).asInstanceOf[Boolean]
         catch case NonFatal(_) => false
 
   def isDirectory(path: String): Boolean =
     val st = stat(path)
     if st == null then false
     else
-      val isDirectoryFn = method(st, "isDirectory")
-      if isDirectoryFn == null then false
+      val isDirectoryFn = st.selectDynamic("isDirectory")
+      if !defined(isDirectoryFn) || js.typeOf(isDirectoryFn) != "function" then false
       else
-        try isDirectoryFn.asInstanceOf[js.Function0[Boolean]]()
+        try isDirectoryFn.asInstanceOf[js.Dynamic].applyDynamic("call")(st).asInstanceOf[Boolean]
         catch case NonFatal(_) => false
 
   def size(path: String): Long =

@@ -8,7 +8,6 @@ import Contexts.*
 import Symbols.*
 import Phases.*
 import dotty.tools.io.JarArchive
-import dotty.tools.backend.jvm.GenBCode
 
 /**
  * Small phase to be run to collect main classes and store them in the context.
@@ -40,13 +39,8 @@ class CollectEntryPoints extends MiniPhase:
     val name = sym.fullName.stripModuleClassSuffix.toString
     Option.when(sym.isStatic && !sym.is(Flags.Trait) && ctx.platform.hasMainMethod(sym))(name)
 
-  private def registerEntryPoint(s: String)(using Context) = {
-    genBCodePhase match {
-      case genBCodePhase: GenBCode =>
-        genBCodePhase.registerEntryPoint(s)
-      case _ =>
-    }
-  }
+  private def registerEntryPoint(s: String)(using Context): Unit =
+    ctx.run.nn.registerEntryPoint(s)
 
 object CollectEntryPoints:
   val name: String = "Collect entry points"

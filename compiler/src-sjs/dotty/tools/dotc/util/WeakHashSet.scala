@@ -18,16 +18,9 @@ abstract class WeakHashSet[A <: AnyRef](initialCapacity: Int = 8, loadFactor: Do
 
   type This = WeakHashSet[A]
 
-  protected val queue: mutable.Queue[Entry[A]] | Null =
-    if hasStaleEntryQueue then mutable.Queue.empty[Entry[A]]
-    else null
+  protected val queue: mutable.Queue[Entry[A]] | Null = null
 
-  protected val registry: js.Dynamic | Null =
-    if hasStaleEntryQueue then
-      newFinalizationRegistry(
-        ((entry: js.Any) => queue.nn.enqueue(entry.asInstanceOf[Entry[A]])): js.Function1[js.Any, Unit]
-      )
-    else null
+  protected val registry: js.Dynamic | Null = null
 
   protected var count = 0
 
@@ -262,25 +255,11 @@ abstract class WeakHashSet[A <: AnyRef](initialCapacity: Int = 8, loadFactor: Do
 }
 
 object WeakHashSet {
-  private def defined(value: js.Any): Boolean =
-    !js.isUndefined(value) && value != null
-
-  private val weakRefCtor: js.Dynamic | Null =
-    val ctor = js.Dynamic.global.selectDynamic("WeakRef")
-    if defined(ctor) then ctor else null
-
-  private val finalizationRegistryCtor: js.Dynamic | Null =
-    val ctor = js.Dynamic.global.selectDynamic("FinalizationRegistry")
-    if defined(ctor) then ctor else null
-
-  private[util] val supportsWeakRefs: Boolean = weakRefCtor != null
-  private[util] val hasStaleEntryQueue: Boolean = supportsWeakRefs && finalizationRegistryCtor != null
-
-  private def newWeakRef[A <: AnyRef](value: A): js.Dynamic =
-    weakRefCtor.nn.newInstance(value.asInstanceOf[js.Any])
-
-  private def newFinalizationRegistry(callback: js.Function1[js.Any, Unit]): js.Dynamic =
-    finalizationRegistryCtor.nn.newInstance(callback)
+  // The Node/Wasm runtime path used by scala3-compiler-sjs does not support
+  // constructing WeakRef / FinalizationRegistry through Scala.js dynamic new.
+  // A strong-reference fallback is sufficient for the current compiler milestone.
+  private[util] val supportsWeakRefs: Boolean = false
+  private[util] val hasStaleEntryQueue: Boolean = false
 
   object Entry:
     def apply[A <: AnyRef](element: A, hash: Int, tail: Entry[A] | Null, registry: js.Dynamic | Null): Entry[A] =
@@ -292,10 +271,7 @@ object WeakHashSet {
     private val unregisterToken: js.Object | Null =
       if registry == null then null else js.Dynamic.literal().asInstanceOf[js.Object]
 
-    private val weakRef: js.Dynamic | Null =
-      if supportsWeakRefs then
-        newWeakRef(element)
-      else null
+    private val weakRef: js.Dynamic | Null = null
 
     private var strongElement: A | Null =
       if weakRef == null then element else null
@@ -308,7 +284,7 @@ object WeakHashSet {
       if weakRef == null then strongElement
       else
         val value = weakRef.applyDynamic("deref")()
-        if defined(value) then value.asInstanceOf[A]
+        if value != null && !js.isUndefined(value) then value.asInstanceOf[A]
         else null
 
     def dispose(): Unit =
