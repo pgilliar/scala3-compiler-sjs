@@ -13,7 +13,8 @@ import scala.util.control.NonFatal
   * It tries, in order:
   * 1) a user-provided global object `globalThis.__scala3CompilerSJSHostFS`
   *    exposing Node-like sync `fs` methods.
-  * 2) Node's `fs` module when a `require` function is available.
+  * 2) Node's builtin module loader exposed as `process.getBuiltinModule`.
+  * 3) Node's `fs` module when a `require` function is available.
   *
   * In browser/no-host environments, methods degrade gracefully.
   */
@@ -55,19 +56,38 @@ private[io] object HostFS:
           if defined(moduleRequire) && js.typeOf(moduleRequire) == "function" then moduleRequire
           else null
 
+  private def builtinModule(name: String): js.Dynamic | Null =
+    val process = readGlobal("process")
+    if !defined(process) then null
+    else
+      val getBuiltinModule = process.selectDynamic("getBuiltinModule")
+      if !defined(getBuiltinModule) || js.typeOf(getBuiltinModule) != "function" then null
+      else
+        try
+          val module = getBuiltinModule.asInstanceOf[js.Function1[String, js.Dynamic]](name)
+          if defined(module) then module else null
+        catch
+          case NonFatal(_) => null
+
   private lazy val configuredFs: js.Dynamic | Null =
     val fs = readGlobal("__scala3CompilerSJSHostFS")
     if defined(fs) then fs else null
 
   private lazy val nodeFs: js.Dynamic | Null =
-    requireFn match
-      case null => null
-      case req =>
-        try req.apply("node:fs").asInstanceOf[js.Dynamic]
-        catch
-          case NonFatal(_) =>
-            try req.apply("fs").asInstanceOf[js.Dynamic]
-            catch case NonFatal(_) => null
+    val builtinFs = builtinModule("node:fs")
+    if builtinFs != null then builtinFs
+    else
+      val legacyBuiltinFs = builtinModule("fs")
+      if legacyBuiltinFs != null then legacyBuiltinFs
+      else
+        requireFn match
+          case null => null
+          case req =>
+            try req.apply("node:fs").asInstanceOf[js.Dynamic]
+            catch
+              case NonFatal(_) =>
+                try req.apply("fs").asInstanceOf[js.Dynamic]
+                catch case NonFatal(_) => null
 
   private lazy val activeFs: js.Dynamic | Null =
     if configuredFs != null then configuredFs else nodeFs

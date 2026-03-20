@@ -73,7 +73,11 @@ class SymbolicXMLBuilder(parser: Parser, preserveWS: Boolean)(using Context) {
   // Changing type to String causes a compiler crash in pickler phase,
   // so we leave it as Any for now.
   private def const(x: Any) =
-    val lit = Literal(Constant(x))
+    val lit = Literal(x match
+      case null => Constant(null)
+      case str: String => Constant(str)
+      case _ => throw new IllegalArgumentException(s"unsupported XML literal constant: ${x.getClass}")
+    )
     if ctx.explicitNulls && x == null
     then TypeApply(Select(lit, nme.asInstanceOf_), TypeTree(defn.StringType) :: Nil)
     else lit
