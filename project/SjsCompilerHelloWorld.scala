@@ -162,24 +162,7 @@ object SjsCompilerHelloWorld {
   private def writeRunner(compilerRunner: File, compilerMain: File): Unit =
     IO.write(
       compilerRunner,
-      s"""import fs from 'node:fs'
-         |
-         |globalThis.__scala3CompilerSJSHostFS = {
-         |  cwd: () => process.cwd(),
-         |  existsSync: (path) => fs.existsSync(path),
-         |  statSync: (path) => fs.statSync(path),
-         |  readdirSync: (path) => fs.readdirSync(path),
-         |  readFileSync: (path) => fs.readFileSync(path),
-         |  mkdirSync: (path, opts) => fs.mkdirSync(path, opts),
-         |  writeFileSync: (path, data) => fs.writeFileSync(path, data),
-         |  appendFileSync: (path, data) => fs.appendFileSync(path, data),
-         |  truncateSync: (path) => fs.truncateSync(path),
-         |  rmSync: (path, opts) => fs.rmSync(path, opts),
-         |  unlinkSync: (path) => fs.unlinkSync(path),
-         |  rmdirSync: (path, opts) => fs.rmdirSync(path, opts),
-         |}
-         |
-         |const { runScala3CompilerSJSAsync } = await import('${compilerMain.toURI}')
+      s"""const { runScala3CompilerSJSAsync } = await import('${compilerMain.toURI}')
          |
          |const code = await runScala3CompilerSJSAsync(process.argv.slice(2))
          |if (code !== 0) process.exit(code)
