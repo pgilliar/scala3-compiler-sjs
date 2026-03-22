@@ -108,7 +108,7 @@ object SjsCompilerHelloWorld {
     val smokeRoot = targetDir / smokeDirName
     val compileOut = smokeRoot / "classes"
     val linkOut = smokeRoot / "linked"
-    val helloSource = baseDir / "tests" / "run" / "HelloWorld.scala"
+    val helloSource = baseDir / "compiler" / "test-resources" / "sjs-compiler" / "HelloWorld.scala"
     val compilerMain = outputDir / "main.js"
     val compilerRunner = smokeRoot / "run-compiler.mjs"
     val compileClasspath = compilerClasspathEntries.map(_.getAbsolutePath).mkString(java.io.File.pathSeparator)
