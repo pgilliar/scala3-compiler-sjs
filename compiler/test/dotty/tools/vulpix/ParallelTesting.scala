@@ -1411,19 +1411,30 @@ trait ParallelTesting extends RunnerOrchestration:
       tests.reduce(aggregate)
   end CompilationTest
 
+  private def recreateOutputDir(targetDir: JFile): JFile = {
+    if (targetDir.exists()) {
+      Using.resource(Files.walk(targetDir.toPath)) { paths =>
+        paths.iterator().asScala.toList
+          .sortBy(_.getNameCount)
+          .reverse
+          .foreach(Files.deleteIfExists)
+      }
+    }
+    targetDir.mkdirs()
+    targetDir
+  }
+
   /** Create out directory for directory `d` */
   def createOutputDirsForDir(d: JFile, sourceDir: JFile, outDir: String): JFile = {
     val targetDir = new JFile(outDir + s"${sourceDir.getName}/${d.getName}")
-    targetDir.mkdirs()
-    targetDir
+    recreateOutputDir(targetDir)
   }
 
   /** Create out directory for `file` */
   private def createOutputDirsForFile(file: JFile, sourceDir: JFile, outDir: String): JFile = {
     val uniqueSubdir = file.getName.substring(0, file.getName.lastIndexOf('.'))
     val targetDir = new JFile(outDir + s"${sourceDir.getName}${JFile.separatorChar}$uniqueSubdir")
-    targetDir.mkdirs()
-    targetDir
+    recreateOutputDir(targetDir)
   }
 
   /** Make sure that directory string is as expected */

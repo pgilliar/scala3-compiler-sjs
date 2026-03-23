@@ -280,7 +280,11 @@ object SourceFile {
    *  with the local separator converted to "/". The last element of the path will be the simple name of the file.
    */
   def virtual(name: String, content: String, maybeIncomplete: Boolean = false) =
-    SourceFile(new VirtualFile(name.replace('\\', '/'), content.getBytes(StandardCharsets.UTF_8)), content.toCharArray)
+    val normalizedName = platformDependent(
+      if java.io.File.separatorChar == '\\' then name.replace('\\', '/')
+      else name
+    )(name)
+    SourceFile(new VirtualFile(normalizedName, content.getBytes(StandardCharsets.UTF_8)), content.toCharArray)
       .tap(_._maybeInComplete = maybeIncomplete)
 
   /** A helper method to create a virtual source file for given URI.

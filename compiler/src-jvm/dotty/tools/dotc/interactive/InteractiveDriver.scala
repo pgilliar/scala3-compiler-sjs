@@ -313,21 +313,26 @@ class InteractiveDriver(val settings: List[String]) extends Driver {
 
 
 object InteractiveDriver {
+  private def toUri(path: String): Option[URI] =
+    try
+      val uri = new URI(path)
+      if uri.isAbsolute then Some(uri)
+      else Some(Paths.get(path).toUri)
+    catch
+      case _: java.net.URISyntaxException | _: IllegalArgumentException =>
+        try Some(Paths.get(path).toUri)
+        catch
+          case _: InvalidPathException =>
+            None
+
   def toUriOption(file: AbstractFile): Option[URI] =
     if (!file.exists)
       None
     else
-      try
-        // We don't use file.file here since it'll be null
-        // for the VirtualFiles created by SourceFile#virtual
-        // TODO: To avoid these round trip conversions, we could add an
-        // AbstractFile#toUri method and implement it by returning a constant
-        // passed as a parameter to a constructor of VirtualFile
-        Some(Paths.get(file.path).toUri)
-      catch {
-        case e: InvalidPathException =>
-          None
-      }
+      // We don't use file.file here since it'll be null
+      // for the VirtualFiles created by SourceFile#virtual.
+      // `file.path` may already be an absolute URI string, so preserve it.
+      toUri(file.path)
   def toUriOption(source: SourceFile): Option[URI] =
     if (!source.exists)
       None
