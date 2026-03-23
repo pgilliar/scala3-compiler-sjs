@@ -268,7 +268,7 @@ object Settings:
         else if ct == OptionTag then
           propertyClass.flatMap(Settings.instantiateOptionValue) match
             case Some(optionValue) =>
-              update(optionValue, "", args)
+              update(Some(optionValue), "", args)
             case None =>
               val className = propertyClass.fold("<missing>")(_.getName)
               state.fail(s"unsupported no-arg option value $className for $name", args)
