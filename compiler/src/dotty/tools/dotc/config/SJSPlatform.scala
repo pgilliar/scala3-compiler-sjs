@@ -15,7 +15,7 @@ object SJSPlatform {
     ctx.platform.asInstanceOf[SJSPlatform]
 }
 
-class SJSPlatform()(using Context) extends JavaPlatform {
+class SJSPlatform(using Context) extends JavaPlatform {
   private var sjsCurrentClassPath: Option[ClassPath] = None
 
   private def sjsClassPath(using Context): ClassPath =

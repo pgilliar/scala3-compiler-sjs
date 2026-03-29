@@ -46,12 +46,7 @@ object FileUtils {
      */
     def hasSiblingTasty: Boolean =
       assert(file.hasClassExtension, s"non-class: $file")
-      platformDependent {
-        file.resolveSibling(classNameToTasty(file.name)) != null
-      } {
-        val sibling = file.resolveSibling(classNameToTasty(file.name))
-        sibling != null && sibling.exists
-      }
+      file.resolveSibling(classNameToTasty(file.name)) != null
   }
 
   extension (file: JFile) {

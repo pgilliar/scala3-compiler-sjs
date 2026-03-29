@@ -30,7 +30,14 @@ trait ClassPath {
   private[dotty] def sources(inPackage: PackageName): Seq[SourceFileEntry]
   private[dotty] def list(inPackage: PackageName): ClassPathEntries
 
-  def findClassFile(className: String): Option[AbstractFile]
+  def findClassFile(className: String): Option[AbstractFile] =
+    findClassFileAndModuleFile(className, findModule = false).map(_._1)
+
+  /** Same as `findClassFile`, but also returns the corresponding module-info class file if there is any. */
+  def findClassFileAndModuleFile(className: String): Option[(AbstractFile, Option[AbstractFile])] =
+    findClassFileAndModuleFile(className, findModule = true)
+
+  def findClassFileAndModuleFile(className: String, findModule: Boolean): Option[(AbstractFile, Option[AbstractFile])]
   def asClassPathStrings: Seq[String]
 
   def asClassPathString: String = ClassPath.join(asClassPathStrings*)

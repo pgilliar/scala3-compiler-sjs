@@ -23,9 +23,9 @@ object ZipAndJarClassPathFactory extends ZipAndJarFileLookupFactory:
     extends ZipArchiveFileLookup[BinaryFileEntry]
     with NoSourcePaths:
 
-    override def findClassFile(className: String): Option[AbstractFile] =
+    override def findClassFileAndModuleFile(className: String, findModule: Boolean): Option[(AbstractFile, Option[AbstractFile])] =
       val (pkg, simpleClassName) = PackageNameUtils.separatePkgAndClassNames(className)
-      file(PackageName(pkg), simpleClassName + ".class").map(_.file)
+      file(PackageName(pkg), simpleClassName + ".class").map(entry => (entry.file, None))
 
     override private[dotty] def classes(inPackage: PackageName): Seq[BinaryFileEntry] = files(inPackage)
 
@@ -35,9 +35,9 @@ object ZipAndJarClassPathFactory extends ZipAndJarFileLookupFactory:
       file.isTasty || (file.isClass && !file.hasSiblingTasty)
 
   private case class ManifestResourcesClassPath(file: ManifestResources) extends ClassPath with NoSourcePaths:
-    override def findClassFile(className: String): Option[AbstractFile] =
+    override def findClassFileAndModuleFile(className: String, findModule: Boolean): Option[(AbstractFile, Option[AbstractFile])] =
       val (pkg, simpleClassName) = PackageNameUtils.separatePkgAndClassNames(className)
-      classes(PackageName(pkg)).find(_.name == simpleClassName).map(_.file)
+      classes(PackageName(pkg)).find(_.name == simpleClassName).map(entry => (entry.file, None))
 
     override def asClassPathStrings: Seq[String] = Seq(file.path)
 

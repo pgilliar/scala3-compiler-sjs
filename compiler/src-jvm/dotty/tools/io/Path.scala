@@ -12,7 +12,6 @@ import java.nio.file.attribute.{BasicFileAttributes, FileTime}
 import java.io.IOException
 import scala.jdk.CollectionConverters.*
 import scala.util.Random.alphanumeric
-import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 /** An abstraction for filesystem paths.  The differences between
  *  Path, File, and Directory are primarily to communicate intent.
@@ -55,19 +54,11 @@ object Path {
   def roots: List[Path] = FileSystems.getDefault.getRootDirectories.iterator().asScala.map(Path.apply).toList
 
   def apply(path: String): Path = apply(new java.io.File(path).toPath)
-  def apply(jpath: JPath): Path = platformDependent {
-    try {
-      if (Files.isRegularFile(jpath)) new File(jpath)
-      else if (Files.isDirectory(jpath)) new Directory(jpath)
-      else new Path(jpath)
-    } catch { case ex: SecurityException => new Path(jpath) }
-  } {
-    try {
-      if (Files.isRegularFile(jpath)) new File(jpath)
-      else if (Files.isDirectory(jpath)) new Directory(jpath)
-      else new Path(jpath)
-    } catch { case ex: SecurityException => new Path(jpath) }
-  }
+  def apply(jpath: JPath): Path = try {
+    if (Files.isRegularFile(jpath)) new File(jpath)
+    else if (Files.isDirectory(jpath)) new Directory(jpath)
+    else new Path(jpath)
+  } catch { case ex: SecurityException => new Path(jpath) }
 
   /** Avoiding any shell/path issues by only using alphanumerics. */
   private[io] def randomPrefix: String = alphanumeric take 6 mkString ""
@@ -208,22 +199,11 @@ class Path private[io] (val jpath: JPath) {
   // Boolean tests
   def canRead: Boolean = Files.isReadable(jpath)
   def canWrite: Boolean = Files.isWritable(jpath)
-  def exists: Boolean = platformDependent {
-    try Files.exists(jpath)  catch { case ex: SecurityException => false }
-  } {
-    false
-  }
-  def isFile: Boolean = platformDependent {
-    try Files.isRegularFile(jpath)  catch { case ex: SecurityException => false }
-  } {
-    false
-  }
-  def isDirectory: Boolean = platformDependent {
+  def exists: Boolean = try Files.exists(jpath)  catch { case ex: SecurityException => false }
+  def isFile: Boolean = try Files.isRegularFile(jpath)  catch { case ex: SecurityException => false }
+  def isDirectory: Boolean =
     try Files.isDirectory(jpath)
     catch { case ex: SecurityException => jpath.toString == "." }
-  } {
-    false
-  }
   def isAbsolute: Boolean = jpath.isAbsolute()
   def isEmpty: Boolean = path.length == 0
 

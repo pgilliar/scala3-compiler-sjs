@@ -91,6 +91,7 @@ object Settings:
       Some(propertyClass.getConstructor().newInstance())
     )(
       propertyClass.getName match
+        // only OptionSetting[T] in the compiler
         case "dotty.tools.dotc.rewrites.Rewrites" => Some(new dotty.tools.dotc.rewrites.Rewrites)
         case _ => None
     )

@@ -98,19 +98,11 @@ object WrappedSourceFile:
             val markerOffset = m.start
             val sourceStartOffset = sourceFile.nextLine(markerOffset)
             val file = ctx.getFile(m.group(1))
-            platformDependent {
-              if file.exists then
-                HasHeader(sourceStartOffset, ctx.getSource(file))
-              else
-                report.warning(em"original source file not found: ${file.path}")
-                NoHeader
-            } {
-              if file.exists then
-                HasHeader(sourceStartOffset, ctx.getSource(file))
-              else
-                report.warning(em"original source file not found: ${file.path}")
-                NoHeader
-            }
+            if file.exists then
+              HasHeader(sourceStartOffset, ctx.getSource(file))
+            else
+              report.warning(em"original source file not found: ${file.path}")
+              NoHeader
           case None => NoHeader
     val result = cache.getOrElseUpdate(sourceFile, findOffset)
     result
@@ -303,8 +295,9 @@ object SourceFile {
     if jpath eq null then
       file.path // repl and other custom tests use abstract files with no path
     else
+      val sourcePathString = jpath.toAbsolutePath.normalize.toString
       platformDependent {
-        val sourcePath = jpath.toAbsolutePath.normalize
+        val sourcePath = java.nio.file.Paths.get(sourcePathString).toAbsolutePath.normalize
         val refPath = java.nio.file.Paths.get(reference).toAbsolutePath.normalize
 
         if sourcePath.startsWith(refPath) then
@@ -326,9 +319,9 @@ object SourceFile {
           val path = refPath.relativize(sourcePath)
           path.iterator.asScala.mkString("/")
         else
-          jpath.toString
+          sourcePathString
       } {
-        val sourcePath = jpath.toAbsolutePath.normalize.toString
+        val sourcePath = sourcePathString
         val refPath = dotty.tools.io.Path(reference).toAbsolute.toString
         if sourcePath.startsWith(refPath) then
           sourcePath.stripPrefix(refPath).stripPrefix("/")
@@ -344,20 +337,13 @@ object SourceFile {
     ScriptSourceFile.hasScriptHeader(content)
 
   def apply(file: AbstractFile | Null, codec: Codec): SourceFile =
-    val chars = platformDependent {
+    val chars =
       // Files.exists is slow on Java 8 (https://rules.sonarsource.com/java/tag/performance/RSPEC-3725),
       // so cope with failure.
       try new String(file.toByteArray, codec.charSet).toCharArray
       catch
-        case _: FileSystemException => Array.empty[Char]
-    } {
-      if file == null || !file.exists then
-        Array.empty[Char]
-      else
-        try new String(file.toByteArray, codec.charSet).toCharArray
-        catch
-          case _: Exception => Array.empty[Char]
-    }
+        case _: Exception => Array.empty[Char]
+
 
     if isScript(file, chars) then
       ScriptSourceFile(file, chars)

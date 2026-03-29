@@ -114,39 +114,36 @@ class Driver {
               catch case e: ReflectiveOperationException => report.error:
                 em"Could not create reporter ${ctx.settings.Yreporter.value}: ${e}"
           )(
-            //TODO SJS: -Yreporter
             report.error(em"`-Yreporter` is not supported by scala3-compiler-sjs")
           )
   }
 
   /** Setup extra classpath of tasty and jar files */
   protected def fromTastySetup(files: List[AbstractFile])(using Context): Context =
-    def configured: Context =
-      if ctx.settings.fromTasty.value then
-        val newEntries: List[String] = files
-          .flatMap { file =>
-            if !file.exists then
-              report.error(em"File does not exist: ${file.path}")
+    if ctx.settings.fromTasty.value then
+      val newEntries: List[String] = files
+        .flatMap { file =>
+          if !file.exists then
+            report.error(em"File does not exist: ${file.path}")
+            None
+          else file.ext match
+            case FileExtension.Jar => Some(file.path)
+            case FileExtension.Tasty | FileExtension.Betasty =>
+              TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
+                case Some(classpath) => Some(classpath)
+                case _ =>
+                  report.error(em"Could not load classname from: ${file.path}")
+                  None
+            case _ =>
+              report.error(em"File extension is not `tasty` or `jar`: ${file.path}")
               None
-            else file.ext match
-              case FileExtension.Jar => Some(file.path)
-              case FileExtension.Tasty | FileExtension.Betasty =>
-                TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
-                  case Some(classpath) => Some(classpath)
-                  case _ =>
-                    report.error(em"Could not load classname from: ${file.path}")
-                    None
-              case _ =>
-                report.error(em"File extension is not `tasty` or `jar`: ${file.path}")
-                None
-          }
-          .distinct
-        val ctx1 = ctx.fresh
-        val fullClassPath =
-          (newEntries :+ ctx.settings.classpath.value).mkString(platformDependent(java.io.File.pathSeparator)(":"))
-        ctx1.setSetting(ctx1.settings.classpath, fullClassPath)
-      else ctx
-    platformDependent(configured)(configured)
+        }
+        .distinct
+      val ctx1 = ctx.fresh
+      val fullClassPath =
+        (newEntries :+ ctx.settings.classpath.value).mkString(platformDependent(java.io.File.pathSeparator)(":"))
+      ctx1.setSetting(ctx1.settings.classpath, fullClassPath)
+    else ctx
 
   /** Entry point to the compiler that can be conveniently used with Java reflection.
    *

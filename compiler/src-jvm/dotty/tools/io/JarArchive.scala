@@ -3,7 +3,6 @@ package dotty.tools.io
 import scala.language.unsafeNulls
 
 import java.nio.file.{FileSystemAlreadyExistsException, FileSystems}
-import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 import scala.jdk.CollectionConverters.*
 
@@ -13,11 +12,7 @@ import scala.jdk.CollectionConverters.*
  */
 class JarArchive private (val jarPath: Path, root: Directory) extends PlainDirectory(root) {
   def close(): Unit = this.synchronized(jpath.getFileSystem().close())
-  override def exists: Boolean = platformDependent {
-    jpath.getFileSystem().isOpen() && super.exists
-  } {
-    false
-  }
+  override def exists: Boolean = jpath.getFileSystem().isOpen() && super.exists
   def allFileNames(): Iterator[String] =
     java.nio.file.Files.walk(jpath).iterator().asScala.map(_.toString)
 

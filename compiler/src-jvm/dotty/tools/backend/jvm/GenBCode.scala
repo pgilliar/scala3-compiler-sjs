@@ -61,7 +61,7 @@ class GenBCode extends Phase { self =>
       _backendUtils = BackendUtils(frontendAccess, bTypes)
     _backendUtils.nn
   }
-  
+
   private var _codeGen: CodeGen | Null = null
   def codeGen(using Context): CodeGen = {
     if _codeGen eq null then

@@ -44,7 +44,7 @@ case class VirtualDirectoryClassPath(dir: VirtualDirectory) extends ClassPath wi
   def asClassPathStrings: Seq[String] = Seq(dir.path)
 
   override def findClassFileAndModuleFile(className: String, findModule: Boolean): Option[(AbstractFile, Option[AbstractFile])] = {
-    val pathSeq = FileUtils.dirPath(className).split(java.io.File.separator)
+    val pathSeq = splitPath(FileUtils.dirPath(className))
     val parentDir = lookupPath(dir)(pathSeq.init.toSeq, directory = true)
     if parentDir == null then None
     else

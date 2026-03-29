@@ -4,6 +4,7 @@ package reporting
 
 import dotty.tools.dotc.config.Settings.Setting
 import dotty.tools.dotc.core.Contexts.*
+import dotty.tools.dotc.interfaces.Diagnostic.{ERROR, INFO, WARNING}
 import dotty.tools.dotc.util.SourcePosition
 import dotty.tools.dotc.util.chaining.*
 
@@ -11,23 +12,6 @@ import java.util.{Collections, Optional, List => JList}
 import core.Decorators.toMessage
 
 object Diagnostic:
-  final val ERROR: Int = 2
-  final val WARNING: Int = 1
-  final val INFO: Int = 0
-
-  private def stripAnsiEscapes(str: String): String =
-    val out = new StringBuilder(str.length)
-    var i = 0
-    while i < str.length do
-      if str.charAt(i) == '\u001b' && i + 1 < str.length && str.charAt(i + 1) == '[' then
-        i += 2
-        while i < str.length && str.charAt(i) != 'm' do
-          i += 1
-        if i < str.length then i += 1
-      else
-        out.append(str.charAt(i))
-        i += 1
-    out.toString
 
   def shouldExplain(dia: Diagnostic)(using Context): Boolean =
     ctx.settings.explain.value && dia.msg.canExplain
@@ -133,7 +117,7 @@ class Diagnostic(
   override def position: Optional[interfaces.SourcePosition] =
     if (pos.exists && pos.source.exists) Optional.of(pos) else Optional.empty()
   override def message: String =
-    Diagnostic.stripAnsiEscapes(msg.message)
+    msg.message.replaceAll("\u001B\\[[;\\d]*m", "")
   override def diagnosticRelatedInformation: JList[interfaces.DiagnosticRelatedInformation] =
     Collections.emptyList()
 

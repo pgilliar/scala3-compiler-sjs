@@ -1809,11 +1809,10 @@ object Build {
       autoScalaLibrary := false,
       // The current JS-side archive handling uses JSPI/await, so the compiler
       // itself still runs through the Scala.js Wasm backend under Node.
-      scalaJSLinkerConfig := {
-        scalaJSLinkerConfig.value
-          .withExperimentalUseWebAssembly(true)
+      scalaJSLinkerConfig ~= {
+        _.withExperimentalUseWebAssembly(true)
           .withModuleKind(ModuleKind.ESModule)
-          .withESFeatures(_.withESVersion(ESVersion.ES2017))
+          .withESFeatures(_.withESVersion(ESVersion.ES2018))
       },
       jsEnv := new NodeJSEnv(NodeJSEnv.Config().withArgs(sjsCompilerNodeFlags)),
       libraryDependencies ++= Seq(

@@ -317,7 +317,7 @@ private [profile] class RealProfiler(reporter : ProfileReporter)(using Context) 
   override def beforeTypedDef(sym: Symbol): TracedEventId = traceDurationStart(Category.TypeCheck, symbolName(sym))
   override def afterTypedDef(event: TracedEventId): Unit = traceDurationEnd(Category.TypeCheck, event)
 
-  override def beforeImplicitSearch(pt: Type): TracedEventId = traceDurationStart(Category.Implicit, s"?[${symbolName(pt.typeSymbol)}]", colour = "yellow")
+  override def beforeImplicitSearch(pt: Type): TracedEventId = traceDurationStart(Category.Implicit, s"?[symbolName(pt.typeSymbol)}]", colour = "yellow")
   override def afterImplicitSearch(event: TracedEventId): Unit = traceDurationEnd(Category.Implicit, event, colour = "yellow")
 
   override def beforeInlineCall(inlineSym: Symbol): TracedEventId = traceDurationStart(Category.Inline, s"«${symbolName(inlineSym)}»", colour = "olive")
