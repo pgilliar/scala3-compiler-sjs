@@ -6,7 +6,7 @@ import core.Comments.{ContextDoc, ContextDocstrings}
 import core.Contexts.*
 import core.{MacroClassLoader, TypeError}
 import dotty.tools.dotc.ast.Positioned
-import dotty.tools.io.{AbstractFile, FileExtension}
+import dotty.tools.io.{AbstractFile, File, FileExtension}
 import reporting.*
 import core.Decorators.*
 import util.chaining.*
@@ -120,18 +120,28 @@ class Driver {
 
   /** Setup extra classpath of tasty and jar files */
   protected def fromTastySetup(files: List[AbstractFile])(using Context): Context =
-    def configured: Context =
-      if ctx.settings.fromTasty.value then
-        val newEntries: List[String] = files
-          .flatMap { file =>
-            if !file.exists then
-              report.error(em"File does not exist: ${file.path}")
+    if ctx.settings.fromTasty.value then
+      val newEntries: List[String] = files
+        .flatMap { file =>
+          if !file.exists then
+            report.error(em"File does not exist: ${file.path}")
+            None
+          else file.ext match
+            case FileExtension.Jar => Some(file.path)
+            case FileExtension.Tasty | FileExtension.Betasty =>
+              TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
+                case Some(classpath) => Some(classpath)
+                case _ =>
+                  report.error(em"Could not load classname from: ${file.path}")
+                  None
+            case _ =>
+              report.error(em"File extension is not `tasty` or `jar`: ${file.path}")
               None
         }
         .distinct
       val ctx1 = ctx.fresh
       val fullClassPath =
-        (newEntries :+ ctx.settings.classpath.value).mkString(platformDependent(java.io.File.pathSeparator)(":"))
+        (newEntries :+ ctx.settings.classpath.value).mkString(File.pathSeparator)
       ctx1.setSetting(ctx1.settings.classpath, fullClassPath)
     else ctx
 

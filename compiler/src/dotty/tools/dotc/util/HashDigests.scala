@@ -13,7 +13,7 @@ object HashDigests:
   def md5Hex(bytes: Array[Byte]): String =
     bytesToHex(md5(bytes), LowerHexDigits)
 
-private def bytesToHex(bytes: Array[Byte], digits: Array[Char]): String =
+  private def bytesToHex(bytes: Array[Byte], digits: Array[Char]): String =
     val chars = new Array[Char](bytes.length * 2)
     var i = 0
     while i < bytes.length do

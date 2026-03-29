@@ -176,7 +176,7 @@ object CompilationUnit {
    *  If `mustExist` is true, this will fail if `source` does not exist.
    */
   def apply(source: SourceFile, mustExist: Boolean = true)(using Context): CompilationUnit = {
-    val src = platformDependent(
+    val src =
       if (!mustExist)
         source
       else if (source.file.isDirectory) {
