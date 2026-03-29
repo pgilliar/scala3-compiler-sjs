@@ -120,22 +120,12 @@ class Driver {
 
   /** Setup extra classpath of tasty and jar files */
   protected def fromTastySetup(files: List[AbstractFile])(using Context): Context =
-    if ctx.settings.fromTasty.value then
-      val newEntries: List[String] = files
-        .flatMap { file =>
-          if !file.exists then
-            report.error(em"File does not exist: ${file.path}")
-            None
-          else file.ext match
-            case FileExtension.Jar => Some(file.path)
-            case FileExtension.Tasty | FileExtension.Betasty =>
-              TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
-                case Some(classpath) => Some(classpath)
-                case _ =>
-                  report.error(em"Could not load classname from: ${file.path}")
-                  None
-            case _ =>
-              report.error(em"File extension is not `tasty` or `jar`: ${file.path}")
+    def configured: Context =
+      if ctx.settings.fromTasty.value then
+        val newEntries: List[String] = files
+          .flatMap { file =>
+            if !file.exists then
+              report.error(em"File does not exist: ${file.path}")
               None
         }
         .distinct

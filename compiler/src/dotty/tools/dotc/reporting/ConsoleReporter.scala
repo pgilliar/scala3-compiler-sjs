@@ -5,7 +5,6 @@ package reporting
 import core.Contexts.*
 import java.io.{ BufferedReader, PrintWriter }
 import Diagnostic.*
-import dotty.tools.dotc.interfaces.Diagnostic.INFO
 
 /**
   * This class implements a Reporter that displays messages on a text console

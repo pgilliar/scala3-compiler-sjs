@@ -18,10 +18,10 @@ import scala.compiletime.uninitialized
 
 object TyperState {
   @sharable private var nextId: Int = 0
-  def initialState() =
+  def initialState(initialReporter: => Reporter = new ConsoleReporter()) =
     TyperState()
       .init(null, OrderingConstraint.empty)
-      .setReporter(new ConsoleReporter())
+      .setReporter(initialReporter)
       .setCommittable(true)
 
   type LevelMap = SimpleIdentityMap[TypeVar, Integer]

@@ -22,7 +22,7 @@ import TypeErasure.ErasedValueType
 
 import dotty.tools.dotc.transform.{Erasure, ValueClasses}
 
-import dotty.tools.dotc.util.SourcePosition
+import dotty.tools.dotc.util.{PlatformDependent, SourcePosition}
 import dotty.tools.dotc.report
 import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
@@ -60,6 +60,7 @@ import scala.reflect.NameTransformer
 class JSCodeGen()(using genCtx: Context) {
   import JSCodeGen.*
   import tpd.*
+  import PlatformDependent.platformDependent
 
   val sjsPlatform = dotty.tools.dotc.config.SJSPlatform.sjsPlatform
   val jsdefn = JSDefinitions.jsdefn
@@ -339,7 +340,7 @@ class JSCodeGen()(using genCtx: Context) {
 
   private def getFileFor(cunit: CompilationUnit, className: ClassName,
       suffix: String): dotty.tools.io.AbstractFile = {
-    val outputDirectory = ctx.settings.outputDir.value
+    val outputDirectory: dotty.tools.io.AbstractFile = ctx.settings.outputDir.value
     val pathParts = className.nameString.split('.')
     val dir = pathParts.init.foldLeft(outputDirectory)(_.subdirectoryNamed(_))
     val filename = pathParts.last

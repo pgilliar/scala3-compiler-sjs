@@ -22,6 +22,7 @@ import config.Config
 import config.Printers.overload
 import util.common.*
 import util.DebugTrace
+import util.PlatformDependent.platformDependent
 import typer.ProtoTypes.NoViewsAllowed
 import reporting.Message
 import collection.mutable.ListBuffer

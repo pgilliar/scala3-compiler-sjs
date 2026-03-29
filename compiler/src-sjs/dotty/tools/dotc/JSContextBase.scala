@@ -5,7 +5,7 @@ import config.Platform
 import config.SJSPlatform
 import core.Contexts.Context
 import core.Contexts.ContextBase
-import core.Phases.Phase
+import core.Phases.phase
 
 final class JSContextBase extends ContextBase:
   override protected def newPlatform(using Context): Platform =

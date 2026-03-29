@@ -261,7 +261,15 @@ object Contexts {
     /** Sourcefile corresponding to given abstract file, memoized */
     def getSource(file: AbstractFile, codec: => Codec = Codec(settings.encoding.value)) = {
       util.Stats.record("Context.getSource")
-      base.sources.getOrElseUpdate(file, SourceFile(file, codec))
+      base.sources.getOrElseUpdate(file,
+        platformDependent {
+          SourceFile(file, codec)
+        } {
+          if file == null then SourceFile(NoAbstractFile, Array.emptyCharArray)
+          else if !file.exists then SourceFile(file, Array.emptyCharArray)
+          else SourceFile(file, codec)
+        }
+      )
     }
 
     /** SourceFile with given path name, memoized */
@@ -285,7 +293,6 @@ object Contexts {
           case ex: Exception =>
             report.error(em"invalid file path: ${ex.getMessage}")
             NoAbstractFile
-
 
     /** AbstractFile with given path, memoized */
     def getFile(name: String): AbstractFile = getFile(name.toTermName)
@@ -779,7 +786,7 @@ object Contexts {
       c._outer = NoContext
       c._period = InitialPeriod
       c._mode = Mode.None
-      c._typerState = TyperState.initialState()
+      c._typerState = TyperState.initialState(base.initialReporter)
       c._owner = NoSymbol
       c._tree = untpd.EmptyTree
       c._moreProperties = Map(MessageLimiter -> DefaultMessageLimiter())
@@ -915,6 +922,8 @@ object Contexts {
                        with Plugins {
 
     val settings: ScalaSettings = ScalaSettings
+
+    protected[dotc] def initialReporter: Reporter = new ConsoleReporter()
 
     /** The initial context */
     val initialCtx: Context = FreshContext.initial(this: @unchecked, settings)

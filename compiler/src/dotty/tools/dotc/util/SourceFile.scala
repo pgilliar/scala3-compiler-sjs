@@ -98,11 +98,19 @@ object WrappedSourceFile:
             val markerOffset = m.start
             val sourceStartOffset = sourceFile.nextLine(markerOffset)
             val file = ctx.getFile(m.group(1))
-            if file.exists then
-              HasHeader(sourceStartOffset, ctx.getSource(file))
-            else
-              report.warning(em"original source file not found: ${file.path}")
-              NoHeader
+            platformDependent {
+              if file.exists then
+                HasHeader(sourceStartOffset, ctx.getSource(file))
+              else
+                report.warning(em"original source file not found: ${file.path}")
+                NoHeader
+            } {
+              if file.exists then
+                HasHeader(sourceStartOffset, ctx.getSource(file))
+              else
+                report.warning(em"original source file not found: ${file.path}")
+                NoHeader
+            }
           case None => NoHeader
     val result = cache.getOrElseUpdate(sourceFile, findOffset)
     result
@@ -315,7 +323,7 @@ object SourceFile {
           // them back, as one would need to know whether they were created on Windows
           // and use both slashes as separators, or on other OS and use forward slash
           // as separator, backslash as file name character.
-          import scala.jdk.CollectionConverters.*
+         import scala.jdk.CollectionConverters.*
           val path = refPath.relativize(sourcePath)
           path.iterator.asScala.mkString("/")
         else
@@ -338,12 +346,11 @@ object SourceFile {
 
   def apply(file: AbstractFile | Null, codec: Codec): SourceFile =
     val chars =
-      // Files.exists is slow on Java 8 (https://rules.sonarsource.com/java/tag/performance/RSPEC-3725),
+     // Files.exists is slow on Java 8 (https://rules.sonarsource.com/java/tag/performance/RSPEC-3725),
       // so cope with failure.
       try new String(file.toByteArray, codec.charSet).toCharArray
       catch
         case _: Exception => Array.empty[Char]
-
 
     if isScript(file, chars) then
       ScriptSourceFile(file, chars)
