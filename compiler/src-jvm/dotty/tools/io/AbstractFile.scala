@@ -13,7 +13,6 @@ import java.io.{
 }
 import java.net.URL
 import java.nio.file.{FileAlreadyExistsException, Files, Paths}
-import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 /**
  * An abstraction over files for use in the reflection/compiler libraries.
@@ -131,11 +130,7 @@ abstract class AbstractFile extends Iterable[AbstractFile] {
 
   /** Does this abstract file denote an existing file? */
   def exists: Boolean = {
-    platformDependent {
       (jpath eq null) || Files.exists(jpath)
-    } {
-      isVirtual
-    }
   }
 
   /** Does this abstract file represent something which can contain classfiles? */

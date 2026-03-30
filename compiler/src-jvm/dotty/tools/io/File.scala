@@ -11,7 +11,6 @@ package dotty.tools.io
 import java.io.{File => JavaIoFile, _}
 import java.nio.file.{Files, Paths}
 import java.nio.file.StandardOpenOption.*
-import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 import scala.io.Codec
 /**
@@ -47,20 +46,13 @@ class File(jpath: JPath)(implicit constructorCodec: Codec) extends Path(jpath) w
     if (cond(this)) Iterator.single(this) else Iterator.empty
 
   /** Obtains an InputStream. */
-  def inputStream(): InputStream = platformDependent {
-    Files.newInputStream(jpath)
-  } {
-    Files.newInputStream(jpath)
-  }
+  def inputStream(): InputStream = Files.newInputStream(jpath)
 
   /** Obtains a OutputStream. */
-  def outputStream(append: Boolean = false): OutputStream = platformDependent {
+  def outputStream(append: Boolean = false): OutputStream =
     if (append) Files.newOutputStream(jpath, CREATE, APPEND)
     else Files.newOutputStream(jpath, CREATE, TRUNCATE_EXISTING)
-  } {
-    if (append) Files.newOutputStream(jpath, CREATE, APPEND)
-    else Files.newOutputStream(jpath, CREATE, TRUNCATE_EXISTING)
-  }
+
   def bufferedOutput(append: Boolean = false): BufferedOutputStream = new BufferedOutputStream(outputStream(append))
 
   /** Obtains an OutputStreamWriter wrapped around a FileOutputStream.
