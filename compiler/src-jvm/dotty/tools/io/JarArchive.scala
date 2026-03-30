@@ -3,7 +3,6 @@ package dotty.tools.io
 import scala.language.unsafeNulls
 
 import java.nio.file.{FileSystemAlreadyExistsException, FileSystems}
-import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 import scala.jdk.CollectionConverters.*
 

@@ -6,14 +6,19 @@ import FileUtils.*
 
 /**
  * JS-side classpath factory.
- *
- * This variant only uses abstract-file based directories/jars and avoids
- * JVM-only `java.nio.file`/`java.io.File`-specific paths.
+ * Provides factory methods for classpath. When creating classpath instances for a given path,
+ * it uses proper type of classpath depending on a types of particular files containing sources or classes.
  */
 class ClassPathFactory {
+  /**
+    * Create a new classpath based on the abstract file.
+  */
   def newClassPath(file: AbstractFile)(using Context): ClassPath =
     ClassPathFactory.newClassPath(file)
 
+  /**
+    * Creators for sub classpaths which preserve this context.
+    */
   def sourcesInPath(path: String)(using Context): List[ClassPath] =
     for
       file <- expandPath(path, expandStar = false)

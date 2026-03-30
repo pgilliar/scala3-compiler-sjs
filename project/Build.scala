@@ -1823,12 +1823,6 @@ object Build {
       Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
       Compile / unmanagedSourceDirectories += (`tasty-core-bootstrapped` / baseDirectory).value / "src",
       Compile / unmanagedSourceDirectories += baseDirectory.value / "src-sjs",
-      Compile / managedSources ~= { sources =>
-        sources.filterNot { source =>
-          val path = source.getPath.replace('\\', '/')
-          path.endsWith("/scalajs-ir-src/org/scalajs/ir/SHA1.scala")
-        }
-      },
       Compile / unmanagedResourceDirectories += baseDirectory.value / "resources",
       // Specify the default entry point of the compiler
       Compile / mainClass := Some("dotty.tools.dotc.MainJS"),
@@ -1907,7 +1901,7 @@ object Build {
       ivyConfigurations += SourceDeps.hide,
       transitiveClassifiers := Seq("sources"),
       libraryDependencies +=
-        ("org.scala-js" %% "scalajs-ir" % scalaJSVersion % "sourcedeps").cross(CrossVersion.for3Use2_13),
+        ("org.scala-js" %%% "scalajs-ir" % scalaJSVersion % "sourcedeps").cross(CrossVersion.for3Use2_13),
       Compile / sourceGenerators += Def.task {
         val s = streams.value
         val cacheDir = s.cacheDirectory
