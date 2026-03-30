@@ -1086,21 +1086,20 @@ object JavaParsers {
         case MINUS | BANG => in.nextToken(); true
         case _ => false
       }
-      val l = in.token match {
-        case TRUE      => !negate
-        case FALSE     => negate
-        case CHARLIT   => in.strVal.charAt(0)
-        case INTLIT    => in.intVal(negate).toInt
-        case LONGLIT   => in.intVal(negate)
-        case FLOATLIT  => in.floatVal(negate).toFloat
-        case DOUBLELIT => in.floatVal(negate)
-        case STRINGLIT => in.strVal
-        case _         => null
+      val constant = in.token match {
+        case TRUE      => Some(Constant(!negate))
+        case FALSE     => Some(Constant(negate))
+        case CHARLIT   => Some(Constant(in.strVal.charAt(0)))
+        case INTLIT    => Some(Constant(in.intVal(negate).toInt))
+        case LONGLIT   => Some(Constant(in.intVal(negate)))
+        case FLOATLIT  => Some(Constant(in.floatVal(negate).toFloat))
+        case DOUBLELIT => Some(Constant(in.floatVal(negate)))
+        case STRINGLIT => Some(Constant(in.strVal))
+        case _         => None
       }
-      if (l == null) None
-      else {
+      constant.map { c =>
         in.nextToken()
-        Some(Constant(l))
+        c
       }
     }
 
