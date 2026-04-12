@@ -1875,6 +1875,7 @@ object Build {
         val _2 = (Compile / fastLinkJS).value
         val libsDir = bundleSjsCompilerLibs.value
         val rtJar = libsDir / "rt.jar"
+        val nonBootExternalDeps = (`scala3-compiler-nonbootstrapped` / Runtime / externalDependencyClasspath).value
 
         if (!rtJar.exists()) {
           s.log.info(s"Extracting java.base from jrt:/ to $rtJar")
@@ -1892,6 +1893,12 @@ object Build {
             libsDir / "scala-lib",
             libsDir / "scalajs-lib",
           ),
+          Seq(
+            (`scala3-compiler-nonbootstrapped` / Compile / packageBin).value,
+            (`scala3-interfaces` / Compile / packageBin).value,
+            (`tasty-core-nonbootstrapped` / Compile / packageBin).value,
+            (`scala-library-nonbootstrapped` / Compile / packageBin).value,
+          ) ++ nonBootExternalDeps.map(_.data),
           "sjs-hello-world-test",
           "scala3-compiler-sjs hello world test passed",
           s.log,
