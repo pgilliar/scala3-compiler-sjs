@@ -515,6 +515,8 @@ private sealed trait YSettings:
   val YdebugCyclic: Setting[Boolean] = BooleanSetting(ForkSetting, "Ydebug-cyclic", "Print the stack trace when a cyclic reference error occurs.", false)
   val Ylog: Setting[List[String]] = PhasesSetting(ForkSetting, "Ylog", "Log operations during")
   val YlogClasspath: Setting[Boolean] = BooleanSetting(ForkSetting, "Ylog-classpath", "Output information about what classpath is being applied.")
+  val YprintClasspathMacros: Setting[String] = StringSetting(ForkSetting, "Yprint-classpath-macros", "package", "Print methods discovered on the classpath under the given package.", "")
+  val YemitClasspathMacros: Setting[String] = StringSetting(ForkSetting, "Yemit-classpath-macros", "package", "Emit a macro payload artifact for methods discovered on the classpath under the given package.", "")
   val YdisableFlatCpCaching: Setting[Boolean] = BooleanSetting(ForkSetting, "YdisableFlatCpCaching", "Do not cache flat classpath representation of classpath elements from jars across compiler instances.")
 
   val Yreporter: Setting[String] = StringSetting(ForkSetting, name = "Yreporter", helpArg = "<class>", descr = "Specify a dotty.tools.dotc.reporting.Reporter", default = "dotty.tools.dotc.reporting.ConsoleReporter")

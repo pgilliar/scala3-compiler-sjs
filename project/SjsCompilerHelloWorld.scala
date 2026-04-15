@@ -95,6 +95,7 @@ object SjsCompilerHelloWorld {
       libsDir: File,
       nodeFlags: Seq[String],
       compilerClasspathEntries: Seq[File],
+      jvmSeedCompilerClasspathEntries: Seq[File],
       smokeDirName: String,
       successMessage: String,
       log: Logger,
@@ -106,14 +107,48 @@ object SjsCompilerHelloWorld {
       sys.error("Missing Node dependency `jszip`. Run `cd compiler && npm install` before executing scala3-compiler-sjs hello world tests.")
 
     val smokeRoot = targetDir / smokeDirName
+    val macroSeedOut = smokeRoot / "macro-classpath"
     val compileOut = smokeRoot / "classes"
     val linkOut = smokeRoot / "linked"
     val helloSource = baseDir / "compiler" / "test-resources" / "sjs-compiler" / "HelloWorld.scala"
+    val macroSource = baseDir / "compiler" / "test-resources" / "sjs-compiler" / "HelloWorldMacro.scala"
     val compilerMain = outputDir / "main.js"
     val compilerRunner = smokeRoot / "run-compiler.mjs"
-    val compileClasspath = compilerClasspathEntries.map(_.getAbsolutePath).mkString(java.io.File.pathSeparator)
+    val macroScanPackage = "smokemacros"
+    val macroPayloadFile = compileOut / "META-INF" / "classpath-macros" / "smokemacros" / "payload.json"
+
+    def mkClasspath(entries: Seq[File]): String =
+      entries.map(_.getAbsolutePath).mkString(java.io.File.pathSeparator)
+
+    def seedMacroClasspath(): Unit = {
+      IO.createDirectory(macroSeedOut)
+      val seedLog = new StringBuilder
+      val seedClasspath = mkClasspath(jvmSeedCompilerClasspathEntries)
+      val seedExit = scala.sys.process.Process(
+        Seq(
+          "java",
+          "-cp",
+          seedClasspath,
+          "dotty.tools.dotc.Main",
+          "-classpath",
+          (libsDir / "scala-lib").getAbsolutePath,
+          "-d",
+          macroSeedOut.getAbsolutePath,
+          "-usejavacp",
+          macroSource.getAbsolutePath,
+        ),
+        baseDir,
+      ).!(scala.sys.process.ProcessLogger(
+        out => seedLog.append(out).append('\n'),
+        err => seedLog.append(err).append('\n'),
+      ))
+
+      if (seedExit != 0)
+        sys.error(s"Failed to seed macro classpath:\n$seedLog")
+    }
 
     IO.delete(smokeRoot)
+    seedMacroClasspath()
     IO.createDirectory(compileOut)
     writeRunner(compilerRunner, compilerMain)
 
@@ -121,8 +156,11 @@ object SjsCompilerHelloWorld {
     val compileExit = scala.sys.process.Process(
       Seq("node") ++ nodeFlags ++ Seq(
         compilerRunner.getAbsolutePath,
-        "-classpath", compileClasspath,
+        "-classpath", mkClasspath(compilerClasspathEntries :+ macroSeedOut),
+        "-Yemit-classpath-macros", macroScanPackage,
+        "-Yprint-classpath-macros", macroScanPackage,
         "-d", compileOut.getAbsolutePath,
+        macroSource.getAbsolutePath,
         helloSource.getAbsolutePath,
       ),
       baseDir,
@@ -134,10 +172,22 @@ object SjsCompilerHelloWorld {
     if (compileExit != 0)
       sys.error(s"scala3-compiler-sjs failed to compile HelloWorld.scala:\n$compileLog")
 
+    compileLog.linesIterator
+      .filter(_.startsWith("[classpath-macros]"))
+      .foreach(line => log.info(line))
+
+    if (!macroPayloadFile.exists())
+      sys.error(s"Expected macro payload artifact at ${macroPayloadFile.getAbsolutePath}")
+
+    val payloadText = IO.read(macroPayloadFile)
+    if (!payloadText.contains("MacroLibrary$.macro1") || !payloadText.contains("inline$macro1Impl") || payloadText.contains("macro2"))
+      sys.error(s"Macro payload artifact did not contain expected implementation refs:\n$payloadText")
+
     val linkedJS = linkScalaJSForTest(
       Seq(compileOut, libsDir / "sjsir"),
       linkOut,
-      "Test",
+      Seq(ModuleInitializer.mainMethodWithArgs("Test", "main", Nil)),
+      ModuleKind.CommonJSModule,
       log,
     )
 
@@ -169,7 +219,13 @@ object SjsCompilerHelloWorld {
          |""".stripMargin
     )
 
-  private def linkScalaJSForTest(classpathEntries: Seq[File], outputDir: File, mainClass: String, log: Logger): File = {
+  private def linkScalaJSForTest(
+      classpathEntries: Seq[File],
+      outputDir: File,
+      moduleInitializers: Seq[ModuleInitializer],
+      moduleKind: ModuleKind,
+      log: Logger,
+  ): File = {
     implicit val ec: ExecutionContext = ExecutionContext.global
 
     IO.delete(outputDir)
@@ -180,7 +236,7 @@ object SjsCompilerHelloWorld {
       .withCheckIR(true)
       .withSourceMap(false)
       .withBatchMode(true)
-      .withModuleKind(ModuleKind.CommonJSModule)
+      .withModuleKind(moduleKind)
     val linker = StandardImpl.linker(linkerConfig)
     val cache = StandardImpl.irFileCache().newCache
 
@@ -190,7 +246,7 @@ object SjsCompilerHelloWorld {
       .flatMap(cache.cached)
       .flatMap(linker.link(
         _,
-        Seq(ModuleInitializer.mainMethodWithArgs(mainClass, "main", Nil)),
+        moduleInitializers,
         PathOutputDirectory(outputDir.toPath),
         logger,
       ))
