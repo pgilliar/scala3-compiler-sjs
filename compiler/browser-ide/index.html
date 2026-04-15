@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scala Browser IDE</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <textarea id="source" spellcheck="false"></textarea>
+
+      <div class="controls">
+        <button id="run-button" type="button" disabled>Run</button>
+      </div>
+
+      <div class="terminal">
+        <pre id="output" class="output"></pre>
+        <form id="terminal-form" class="terminal-form" hidden>
+          <span class="terminal-prefix">&gt;</span>
+          <input id="terminal-input" class="terminal-input" type="text" autocomplete="off" spellcheck="false">
+        </form>
+      </div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

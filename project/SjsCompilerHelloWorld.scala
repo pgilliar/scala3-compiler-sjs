@@ -19,6 +19,9 @@ import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 object SjsCompilerHelloWorld {
+  private val BrowserIDECompilerJSImport = """import * as importedjszip from "jszip";"""
+  private val BrowserIDEPatchedJSImport = """import * as importedjszip from "../vendor/jszip-wrapper.js";"""
+
   def bundleCompilerLibs(
       targetDir: File,
       scalaLibClasses: File,
@@ -59,6 +62,98 @@ object SjsCompilerHelloWorld {
     }
 
     libDir
+  }
+
+  def prepareBrowserIDE(
+      browserIdeDir: File,
+      compilerOutputDir: File,
+      scalaLibJar: File,
+      scalaJSLibJar: File,
+      rtJar: File,
+      runtimeIRZip: File,
+      jszipDist: File,
+      log: Logger,
+  ): File = {
+    val assetsDir = browserIdeDir / "assets"
+    val compilerDir = assetsDir / "compiler"
+    val vendorDir = assetsDir / "vendor"
+    val classpathDir = assetsDir / "classpath"
+    val runtimeDir = assetsDir / "runtime"
+
+    IO.delete(assetsDir)
+    Seq(compilerDir, vendorDir, classpathDir, runtimeDir).foreach(IO.createDirectory)
+
+    val compilerMain = compilerOutputDir / "main.js"
+    val compilerWasm = compilerOutputDir / "main.wasm"
+    val compilerLoader = compilerOutputDir / "__loader.js"
+    if (!compilerMain.exists() || !compilerWasm.exists() || !compilerLoader.exists())
+      sys.error(s"Missing scala3-compiler-sjs fastLink output in $compilerOutputDir. Run fastLinkJS first.")
+
+    val compilerMainContents = IO.read(compilerMain)
+    val patchedCompilerMain = compilerMainContents.replace(BrowserIDECompilerJSImport, BrowserIDEPatchedJSImport)
+    if (patchedCompilerMain == compilerMainContents)
+      sys.error(s"Could not rewrite JSZip import in ${compilerMain.getAbsolutePath}")
+
+    IO.write(compilerDir / "main.js", patchedCompilerMain)
+    Seq(
+      compilerLoader -> (compilerDir / "__loader.js"),
+      compilerWasm -> (compilerDir / "main.wasm"),
+      jszipDist -> (vendorDir / "jszip.global.js"),
+      rtJar -> (classpathDir / "rt.jar"),
+      scalaLibJar -> (classpathDir / "scala-lib.jar"),
+      scalaJSLibJar -> (classpathDir / "scalajs-lib.jar"),
+      runtimeIRZip -> (runtimeDir / "runtime-sjsir.zip"),
+    ).foreach { case (src, dest) => IO.copyFile(src, dest) }
+
+    IO.write(
+      vendorDir / "jszip-wrapper.js",
+      """import "./jszip.global.js";
+        |
+        |const JSZip = globalThis.JSZip;
+        |
+        |if (!JSZip) {
+        |  throw new Error("JSZip failed to initialize for the browser IDE.");
+        |}
+        |
+        |export default JSZip;
+        |""".stripMargin
+    )
+
+    IO.write(
+      assetsDir / "manifest.json",
+      """{
+        |  "compilerModule": "./assets/compiler/main.js",
+        |  "runtimeIR": "./assets/runtime/runtime-sjsir.zip",
+        |  "classpath": [
+        |    { "path": "/lib/rt.jar", "url": "./assets/classpath/rt.jar" },
+        |    { "path": "/lib/scala-lib.jar", "url": "./assets/classpath/scala-lib.jar" },
+        |    { "path": "/lib/scalajs-lib.jar", "url": "./assets/classpath/scalajs-lib.jar" }
+        |  ]
+        |}
+        |""".stripMargin
+    )
+
+    log.info(s"Prepared browser IDE assets in $browserIdeDir")
+    browserIdeDir
+  }
+
+  def zipDirectory(sourceDir: File, targetZip: File): File = {
+    IO.createDirectory(targetZip.getParentFile)
+
+    val files = (sourceDir ** "*").get.filter(_.isFile)
+    val zipStream = new ZipOutputStream(new FileOutputStream(targetZip))
+    try {
+      files.foreach { file =>
+        val relative = sourceDir.toPath.relativize(file.toPath).iterator().asScala.mkString("/")
+        zipStream.putNextEntry(new ZipEntry(relative))
+        zipStream.write(IO.readBytes(file))
+        zipStream.closeEntry()
+      }
+    } finally {
+      zipStream.close()
+    }
+
+    targetZip
   }
 
   def extractRTJar(targetRTJar: File): Unit = {

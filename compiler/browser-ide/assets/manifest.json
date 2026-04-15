@@ -1,0 +1,9 @@
+{
+  "compilerModule": "./assets/compiler/main.js",
+  "runtimeIR": "./assets/runtime/runtime-sjsir.zip",
+  "classpath": [
+    { "path": "/lib/rt.jar", "url": "./assets/classpath/rt.jar" },
+    { "path": "/lib/scala-lib.jar", "url": "./assets/classpath/scala-lib.jar" },
+    { "path": "/lib/scalajs-lib.jar", "url": "./assets/classpath/scalajs-lib.jar" }
+  ]
+}

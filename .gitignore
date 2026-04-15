@@ -21,6 +21,7 @@ project/local-plugins.sbt
 local.sbt
 
 # npm
+/assets/
 node_modules
 
 # VS Code
