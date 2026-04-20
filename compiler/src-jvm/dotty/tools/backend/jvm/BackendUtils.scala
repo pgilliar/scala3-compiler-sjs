@@ -643,7 +643,7 @@ object BackendUtils {
   def isTraitSuperAccessorOrMixinForwarder(method: MethodNode, owner: ClassBType): Boolean = {
     isTraitSuperAccessor(method, owner) || isMixinForwarder(method, owner)
   }
-  
+
   def traitSuperAccessorName(sym: Symbol)(using Context): String = {
     val nameString = sym.javaSimpleName
     if (sym.name == nme.TRAIT_CONSTRUCTOR) nameString
@@ -689,7 +689,7 @@ object BackendUtils {
   def methodSignature(classInternalName: InternalName, method: MethodNode): String = {
     methodSignature(classInternalName, method.name, method.desc)
   }
-
+  
   def siteString(owner: String, method: String): String = {
     val c = owner.replace('/', '.').replaceAll("\\$+", ".").replaceAll("\\.$", "")
     if (method.isEmpty) c
