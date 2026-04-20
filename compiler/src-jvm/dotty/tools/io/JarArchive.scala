@@ -13,7 +13,6 @@ import scala.jdk.CollectionConverters.*
 class JarArchive private (val jarPath: Path, root: Directory) extends PlainDirectory(root) {
   def close(): Unit = this.synchronized(jpath.getFileSystem().close())
   override def exists: Boolean = jpath.getFileSystem().isOpen() && super.exists
-
   def allFileNames(): Iterator[String] =
     java.nio.file.Files.walk(jpath).iterator().asScala.map(_.toString)
 

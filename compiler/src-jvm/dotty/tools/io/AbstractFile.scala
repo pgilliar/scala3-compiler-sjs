@@ -130,7 +130,7 @@ abstract class AbstractFile extends Iterable[AbstractFile] {
 
   /** Does this abstract file denote an existing file? */
   def exists: Boolean = {
-      (jpath eq null) || Files.exists(jpath)
+    (jpath eq null) || Files.exists(jpath)
   }
 
   /** Does this abstract file represent something which can contain classfiles? */

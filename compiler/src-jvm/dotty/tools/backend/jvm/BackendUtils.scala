@@ -231,7 +231,7 @@ class BackendUtils(val ppa: PostProcessorFrontendAccess, val ts: CoreBTypes)(usi
   def indyLambdaBodyMethods(hostClass: InternalName, method: MethodNode): Map[InvokeDynamicInsnNode, Handle] = {
     onIndyLambdaImplMethodIfPresent(hostClass)(ms => ms.getOrElse(method, Nil).toMap).getOrElse(Map.empty)
   }
- 
+
   def isPredefLoad(insn: AbstractInsnNode): Boolean = BackendUtils.isModuleLoad(insn, _ == ts.PredefRef.internalName)
 
   // ==============================================================================================
@@ -643,7 +643,7 @@ object BackendUtils {
   def isTraitSuperAccessorOrMixinForwarder(method: MethodNode, owner: ClassBType): Boolean = {
     isTraitSuperAccessor(method, owner) || isMixinForwarder(method, owner)
   }
-
+  
   def traitSuperAccessorName(sym: Symbol)(using Context): String = {
     val nameString = sym.javaSimpleName
     if (sym.name == nme.TRAIT_CONSTRUCTOR) nameString

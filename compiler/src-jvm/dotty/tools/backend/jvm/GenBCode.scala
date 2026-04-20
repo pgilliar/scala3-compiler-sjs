@@ -37,6 +37,8 @@ class GenBCode extends Phase { self =>
 
   override def isRunnable(using Context): Boolean = super.isRunnable && !ctx.usedBestEffortTasty
 
+  private val entryPoints = new mutable.HashSet[String]()
+  def registerEntryPoint(s: String): Unit = entryPoints += s
 
   private var _frontendAccess: PostProcessorFrontendAccess | Null = null
   def frontendAccess(using Context): PostProcessorFrontendAccess = {

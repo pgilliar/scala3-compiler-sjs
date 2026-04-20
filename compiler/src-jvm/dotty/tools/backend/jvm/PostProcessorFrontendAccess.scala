@@ -24,7 +24,7 @@ sealed abstract class PostProcessorFrontendAccess(val ctx: FreshContext) {
   def getEntryPoints: List[String]
 
   def findClassFileAndModuleFile(name: String): Option[(io.AbstractFile, Option[io.AbstractFile])]
-
+  
   def optimizerWarning(msg: Context ?=> Message, site: String, pos: SrcPos): Unit =
     report.optimizerWarning(msg(using ctx), site, pos)(using ctx)
 

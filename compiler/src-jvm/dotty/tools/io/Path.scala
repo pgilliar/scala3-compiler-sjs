@@ -47,12 +47,11 @@ object Path {
   def roots: List[Path] = FileSystems.getDefault.getRootDirectories.iterator().asScala.map(Path.apply).toList
 
   def apply(path: String): Path = apply(new java.io.File(path).toPath)
-  def apply(jpath: JPath): Path =
-    try {
-      if (Files.isRegularFile(jpath)) new File(jpath)
-      else if (Files.isDirectory(jpath)) new Directory(jpath)
-      else new Path(jpath)
-    } catch { case ex: SecurityException => new Path(jpath) }
+  def apply(jpath: JPath): Path = try {
+    if (Files.isRegularFile(jpath)) new File(jpath)
+    else if (Files.isDirectory(jpath)) new Directory(jpath)
+    else new Path(jpath)
+  } catch { case ex: SecurityException => new Path(jpath) }
 
   private[io] def fail(msg: String): Nothing = throw FileOperationException(msg)
 }
@@ -174,16 +173,11 @@ class Path private[io] (val jpath: JPath) {
   // Boolean tests
   def canRead: Boolean = Files.isReadable(jpath)
   def canWrite: Boolean = Files.isWritable(jpath)
-  def exists: Boolean =
-    try Files.exists(jpath)  catch { case ex: SecurityException => false }
-
-  def isFile: Boolean =
-    try Files.isRegularFile(jpath)  catch { case ex: SecurityException => false }
-
+  def exists: Boolean = try Files.exists(jpath)  catch { case ex: SecurityException => false }
+  def isFile: Boolean = try Files.isRegularFile(jpath)  catch { case ex: SecurityException => false }
   def isDirectory: Boolean =
     try Files.isDirectory(jpath)
     catch { case ex: SecurityException => jpath.toString == "." }
-  
   def isAbsolute: Boolean = jpath.isAbsolute()
   def isEmpty: Boolean = path.length == 0
 
