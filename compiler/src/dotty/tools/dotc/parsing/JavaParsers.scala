@@ -1097,10 +1097,9 @@ object JavaParsers {
         case STRINGLIT => Some(Constant(in.strVal))
         case _         => None
       }
-      constant.map { c =>
+      if constant.isDefined then
         in.nextToken()
-        c
-      }
+      constant
     }
 
     /** CompilationUnit ::= {Annotation} [package QualId semi] {Import} {TypeDecl}

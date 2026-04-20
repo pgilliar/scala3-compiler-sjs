@@ -71,12 +71,12 @@ class SymbolicXMLBuilder(parser: Parser, preserveWS: Boolean)(using Context) {
 
   // convenience methods
   private def LL[A](x: A*): List[List[A]] = List(x.toList)
-  private def const(x: String): Tree = Literal(Constant.fromValue(x))
+  private def const(x: String): Tree = Literal(Constant(x))
 
   private def nullAsString: Tree =
-    val lit = Literal(Constant.fromValue(null))
+    val lit = Literal(Constant(null))
     if ctx.explicitNulls
-      then TypeApply(Select(lit, nme.asInstanceOf_), TypeTree(defn.StringType) :: Nil)
+    then TypeApply(Select(lit, nme.asInstanceOf_), TypeTree(defn.StringType) :: Nil)
     else lit
 
   private def wild                          = Ident(nme.WILDCARD)

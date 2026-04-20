@@ -1424,7 +1424,7 @@ object Parsers {
           case INTLIT                         => lit(intFromDigits(digits, in.base))
           case LONGLIT                        => lit(longFromDigits(digits, in.base))
           case FLOATLIT                       => lit(floatFromDigits(digits))
-          case DOUBLELIT | DECILIT | EXPOLIT => lit(doubleFromDigits(digits))
+          case DOUBLELIT | DECILIT | EXPOLIT  => lit(doubleFromDigits(digits))
           case CHARLIT                        => lit(in.strVal.head)
           case STRINGLIT | STRINGPART         => lit(in.strVal)
           case TRUE                           => lit(true)
