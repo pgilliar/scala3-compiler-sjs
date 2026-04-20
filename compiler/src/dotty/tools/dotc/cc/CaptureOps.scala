@@ -89,7 +89,7 @@ extension (tp: Type)
   def retainedElementsRaw(using Context): List[Type] = tp match
     case OrType(tp1, tp2) =>
       tp1.retainedElementsRaw ++ tp2.retainedElementsRaw
-    case AnnotatedType(tp1, ann: RetainingAnnotation) if tp1.derivesFrom(defn.Caps_CapSet) =>
+    case AnnotatedType(tp1, ann: RetainingAnnotation) if tp1.derivesFromCapSet =>
       ann.retainedType.retainedElementsRaw
     case tp =>
       tp.dealiasKeepAnnots match
@@ -108,7 +108,7 @@ extension (tp: Type)
   def retainedElements(using Context): List[Capability] =
     retainedElementsRaw.flatMap: elem =>
       elem match
-        case CapturingType(parent, refs) if parent.derivesFrom(defn.Caps_CapSet) =>
+        case CapturingType(parent, refs) if parent.derivesFromCapSet =>
           refs.elems.toList
         case _ =>
           elem.toCapability :: Nil
@@ -128,17 +128,15 @@ extension (tp: Type)
         || tp.symbol.isField && tp.prefix.isPrefixOfTrackableRef
         ) && !tp.symbol.isOneOf(UnstableValueFlags)
     case tp: TypeRef =>
-      tp.symbol.isType && tp.derivesFrom(defn.Caps_CapSet)
+      tp.symbol.isType && tp.derivesFromCapSet
     case tp: TypeParamRef =>
       !tp.underlying.exists // might happen during construction of lambdas
-      || tp.derivesFrom(defn.Caps_CapSet)
+      || tp.derivesFromCapSet
     case _ =>
       false
 
   private def isPrefixOfTrackableRef(using Context): Boolean =
-    isTrackableRef || tp.match
-      case tp: TermRef => tp.symbol.is(Package)
-      case _ => false
+    isTrackableRef || tp.refersToPackage
 
   /** The capture set of a type. This is:
     *   - For object capabilities: The singleton capture set consisting of
@@ -214,7 +212,7 @@ extension (tp: Type)
   def boxed(using Context): Type = tp.dealias match
     case tp @ CapturingType(parent, refs) if !tp.isBoxed && !refs.isAlwaysEmpty =>
       tp.annot match
-        case ann: CaptureAnnotation if !parent.derivesFrom(defn.Caps_CapSet) =>
+        case ann: CaptureAnnotation if !parent.derivesFromCapSet =>
           AnnotatedType(parent, ann.boxedAnnot)
         case ann => tp
     case tp: RealTypeBounds =>
@@ -240,10 +238,10 @@ extension (tp: Type)
   def boxDeeply(using Context): Type =
     def recur(tp: Type): Type = tp.dealiasKeepAnnotsAndOpaques match
       case tp @ CapturingType(parent, refs) =>
-        if tp.isBoxed || parent.derivesFrom(defn.Caps_CapSet) then tp
+        if tp.isBoxed || parent.derivesFromCapSet then tp
         else tp.boxed
       case tp @ AnnotatedType(parent, ann: RetainingAnnotation)
-      if !parent.derivesFrom(defn.Caps_CapSet) =>
+      if !parent.derivesFromCapSet =>
         assert(ann.isStrict)
         CapturingType(parent, ann.toCaptureSet, boxed = true)
       case tp @ AnnotatedType(parent, ann) =>
@@ -393,7 +391,8 @@ extension (tp: Type)
   def derivesFromCapTrait(cls: ClassSymbol)(using Context): Boolean = tp.dealiasKeepAnnots match
     case tp: (TypeRef | AppliedType) =>
       val sym = tp.typeSymbol
-      if sym.isClass then sym.derivesFrom(cls)
+      if sym.isClass
+      then (if sym.isArrayUnderStrictMut then defn.Caps_Mutable else sym).derivesFrom(cls)
       else tp.superType.derivesFromCapTrait(cls)
     case tp: (TypeProxy & ValueType) =>
       tp.superType.derivesFromCapTrait(cls)
@@ -404,18 +403,9 @@ extension (tp: Type)
     case _ =>
       false
 
-  def derivesFromCapability(using Context): Boolean =
-    derivesFromCapTrait(defn.Caps_Capability) || isArrayUnderStrictMut
-  def derivesFromExclusive(using Context): Boolean =
-    derivesFromCapTrait(defn.Caps_ExclusiveCapability) || isArrayUnderStrictMut
-  def derivesFromStateful(using Context): Boolean =
-    derivesFromCapTrait(defn.Caps_Stateful) || isArrayUnderStrictMut
-  def derivesFromShared(using Context): Boolean =
-    derivesFromCapTrait(defn.Caps_SharedCapability)
-  def derivesFromUnscoped(using Context): Boolean =
-    derivesFromCapTrait(defn.Caps_Unscoped) || isArrayUnderStrictMut
-  def derivesFromMutable(using Context): Boolean =
-    derivesFromCapTrait(defn.Caps_Mutable) || isArrayUnderStrictMut
+  def derivesFromStateful(using Context): Boolean = derivesFromCapTrait(defn.Caps_Stateful)
+  def derivesFromCapability(using Context): Boolean = derivesFromCapTrait(defn.Caps_Capability)
+  def derivesFromCapSet(using Context) = tp.derivesFrom(defn.Caps_CapSet)
 
   def isArrayUnderStrictMut(using Context): Boolean = tp.classSymbol.isArrayUnderStrictMut
 
@@ -471,7 +461,7 @@ extension (tp: Type)
         else if variance <= 0 then false
         else if directly && defn.isFunctionSymbol(t.typeSymbol) then false
         else t match
-          case CapturingType(_, refs) if refs.elems.exists(_.core == c) =>
+          case CapturingOrRetainsType(_, refs) if refs.elems.exists(_.core == c) =>
             true
           case t @ AnnotatedType(parent, ann) =>
             // Don't traverse annotations, which includes capture sets
@@ -558,13 +548,16 @@ extension (cls: ClassSymbol) {
       bc.is(CaptureChecked) && selfType.exists && selfType.captureSet.elems == refs.elems
 
   def isClassifiedCapabilityClass(using Context): Boolean =
-    cls.derivesFrom(defn.Caps_Capability) && cls.parentSyms.contains(defn.Caps_Classifier)
+    cls.derivesFromCapability && cls.parentSyms.contains(defn.Caps_Classifier)
 
   def classifier(using Context): ClassSymbol =
-    if cls.derivesFrom(defn.Caps_Capability) then
-      cls.baseClasses
-        .filter(_.parentSyms.contains(defn.Caps_Classifier))
-        .foldLeft(defn.AnyClass)(leastClassifier)
+    if cls.derivesFromCapability then
+      if cls.isArrayUnderStrictMut then
+        defn.Caps_Unscoped
+      else
+        cls.baseClasses
+          .filter(_.parentSyms.contains(defn.Caps_Classifier))
+          .foldLeft(defn.AnyClass)(leastClassifier)
     else defn.AnyClass
 
   /** The additional capture set implied by the capture sets of its fields. This
@@ -606,7 +599,7 @@ extension (cls: ClassSymbol) {
       case _ => Nil
 
     def maybeRO(ref: Capability, fields: List[Symbol]) =
-      if !cls.typeRef.isStatefulType && fields.forall(allLocalCapsInTypeAreRO)
+      if !cls.typeRef.isStatefulType() && fields.forall(allLocalCapsInTypeAreRO)
       then ref.readOnly
       else ref
 
@@ -614,7 +607,8 @@ extension (cls: ClassSymbol) {
       LocalCap(Origin.NewInstance(core, fields))
 
     var implied = impliedClassifiers(cls)
-    if cls.typeRef.isStatefulType then implied = dominators(cls.classifier :: Nil, implied)
+    if cls.typeRef.isStatefulType(varsOnly = true) then
+      implied = dominators(cls.classifier :: Nil, implied)
     val fields = contributingFields(cls)
     val impliedSet = ccState.localCapClassifiersAndFieldsCache.getOrElseUpdate(cls, (implied, fields)) match
       case (Nil, _) =>
@@ -629,7 +623,7 @@ extension (cls: ClassSymbol) {
   }
 
   def creationCapset(using Context)(core: Type = cls.appliedRef): CaptureSet =
-    if cls.derivesFrom(defn.Caps_Capability)
+    if cls.derivesFromCapability
     then LocalCap(Origin.NewInstance(core, Nil)).singletonCaptureSet
     else cls.capturesImpliedByFields(core).refs
 
@@ -781,8 +775,17 @@ extension (sym: Symbol) {
   def isArrayUnderStrictMut(using Context): Boolean =
     sym == defn.ArrayClass && ccConfig.strictMutability
 
+  def derivesFromCapability(using Context): Boolean =
+    sym.derivesFrom(defn.Caps_Capability) || sym.isArrayUnderStrictMut
+
   def isDisallowedInCapset(using Context): Boolean =
     sym.isOneOf(if ccConfig.strictMutability then Method else UnstableValueFlags)
+
+  def isScalaDocSnippet(using Context): Boolean =
+    sym.is(ModuleClass)
+    && (sym.sourceModule.name == nme.Snippet)
+    && sym.owner.is(Package)
+    && sym.owner.name.toString.contains("snippet")
 
   /** Is symbol exempt from checking that its type or uses clause must
    *  be given explicitly? This is the case for symbols that are not
@@ -791,13 +794,20 @@ extension (sym: Symbol) {
    */
   def isExemptFromExplicitChecks(using Context): Boolean =
     sym.isLocalToCompilationUnit
+    || sym.isScalaDocSnippet
+    || sym.name.isReplWrapperName
+    || sym.isConstructor && sym.owner.name.isReplWrapperName
     || ctx.owner.enclosingPackageClass.isEmptyPackage
-      // We make an exception for symbols in the empty package.
-      // these could theoretically be accessed from other files in the empty package, but
-      // usually it would be too annoying to require explicit types.
+        && !sym.ownersIterator.takeWhile(!_.is(Package))
+            .exists(_.hasAnnotation(defn.AssumeSafeAnnot))
+      // We make an exception for symbols in the empty package unless they are
+      // compiled in safe mode or wrapped in @assumeSafe. These could theoretically
+      // be accessed from other files in the empty package, but usually it would
+      // be too annoying to require explicit types. @assumeSafe symbols are not exempt,
+      // since for them precise recording of capabilities is essential.
     || sym.name.is(DefaultGetterName)
       // Default getters are exempted since otherwise it would be
-      // too annoying. This is a hole since a defualt getter's result type
+      // too annoying. This is a hole since a default getter's result type
       // might leak into a type variable.
 
   /** If `sym` is a method or a non-static inner class, a capture set
@@ -806,18 +816,20 @@ extension (sym: Symbol) {
   def useSet(using Context): CaptureSet =
     ccState.useSetCache.getOrElseUpdate(sym,
       sym.getAnnotation(defn.RetainsAnnot) match
-        case Some(ann: RetainingAnnotation) =>
-          try ann.toCaptureSet
+        case Some(ann) =>
+          // If we read from Tasty, the annotation is not a RetainingAnnotation but is
+          // instead a regular annotation of type TreeUnpickler#DeferredSymAndTree.
+          // Map it to a RetainingAnnotation now.
+          try RetainingAnnotation.fromAnnotation(ann).toCaptureSet
           catch case ex: IllegalCaptureRef =>
             report.error(em"Illegal capture reference: ${ex.getMessage}", sym.srcPos)
             CaptureSet.empty
         case _ =>
           if sym.is(Package)
             || (sym.isClass || sym.isConstructor) && !sym.isExemptFromExplicitChecks
-            // If `sym` does not have a `uses` clause (or `uses_init` for constructors)
-            // set its capture set to the empty set, unless it is local to the current
-            // compilation unit. For local classes and constructors we infer their
-            // use set.
+            // If `sym` does not have a `uses` clause, set its capture set to the empty set,
+            // unless it is local to the current compilation unit.
+            // For local classes and constructors we infer their use set.
           then CaptureSet.empty
           else CaptureSet.Var(sym, nestedOK = false)
     )

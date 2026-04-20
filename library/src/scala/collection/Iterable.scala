@@ -264,9 +264,12 @@ transparent trait IterableOps[+A, +CC[_], +C] extends Any with IterableOnce[A] w
    *       x >  0       if this.size >  otherSize
    *  ```
    *
-   *  The method as implemented here does not call `size` directly; its running time
-   *  is `O(size min otherSize)` instead of `O(size)`. The method should be overridden
-   *  if computing `size` is cheap and `knownSize` returns `-1`.
+   *  The default implementation does not call `size`, which may be arbitrarily expensive.
+   *  It will use `knownSize` if nonnegative.
+   *  Otherwise, it will iterate to compute an element count,
+   *  with complexity `O(size min otherSize)`.
+   *  This method should be overridden if computing `size` is cheap and `knownSize` returns `-1`.
+   *  In that case, the custom implementation should just compare `size` and `otherSize` directly.
    *
    *  @see [[sizeIs]]
    */
@@ -725,7 +728,7 @@ transparent trait IterableOps[+A, +CC[_], +C] extends Any with IterableOnce[A] w
    */
   def concat[B >: A](suffix: IterableOnce[B]^): CC[B]^{this, suffix} = iterableFactory.from {
     suffix match {
-      case suffix: Iterable[B] => new View.Concat(this, suffix)
+      case suffix: Iterable[B @unchecked] => new View.Concat(this, suffix)
       case suffix => iterator ++ suffix.iterator
     }
   }
@@ -743,7 +746,7 @@ transparent trait IterableOps[+A, +CC[_], +C] extends Any with IterableOnce[A] w
    *                 The length of the returned collection is the minimum of the lengths of this $coll and `that`.
    */
   def zip[B](that: IterableOnce[B]^): CC[(A @uncheckedVariance, B)]^{this, that} = iterableFactory.from(that match { // sound bcs of VarianceNote
-    case that: Iterable[B] => new View.Zip(this, that)
+    case that: Iterable[B @unchecked] => new View.Zip(this, that)
     case _ => iterator.zip(that)
   })
 
@@ -851,7 +854,7 @@ transparent trait IterableOps[+A, +CC[_], +C] extends Any with IterableOnce[A] w
 
   @deprecated("Use ++ instead of ++: for collections of type Iterable", "2.13.0")
   def ++:[B >: A](that: IterableOnce[B]^): CC[B]^{this, that} = iterableFactory.from(that match {
-    case xs: Iterable[B] => new View.Concat(xs, this)
+    case xs: Iterable[B @unchecked] => new View.Concat(xs, this)
     case _ => that.iterator ++ iterator
   })
 }

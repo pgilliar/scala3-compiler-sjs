@@ -114,7 +114,7 @@ object CheckCaptures:
     def check(elem: Type): Unit = elem match
       case ref: TypeRef =>
         val refSym = ref.symbol
-        if refSym.isType && !refSym.info.derivesFrom(defn.Caps_CapSet) then
+        if refSym.isType && !refSym.info.derivesFromCapSet then
           report.error(em"$elem is not a legal element of a capture set", ann.srcPos)
       case ref: CoreCapability =>
         if !ref.isTrackableRef && !ref.isLocalMutable then
@@ -414,7 +414,7 @@ class CheckCaptures extends Recheck, SymTransformer:
       private def descr(elem: CoreCapability, cls: Symbol)(using Context): String =
         def wrap(why: String) =
           i"\n\nNote that `${elem.showAsCapability}` is a capability $why."
-        if cls.isStaticOwner && !cls.derivesFrom(defn.Caps_Capability) then
+        if cls.isStaticOwner && !cls.derivesFromCapability then
           val uses = cls.useSet
           if !uses.elems.isEmpty then
             wrap(i"because it uses $uses")
@@ -742,15 +742,21 @@ class CheckCaptures extends Recheck, SymTransformer:
         // that uses captured references.
         includeCallCaptures(sym, sym.info, tree)
 
-      if sym.exists && !sym.is(Method) && !sym.is(Package) then
-        // Mark symbol as used, either as a path if it is a field of some tracked object
-        // or by itself.
-        sym.maybeOwner.thisType match
-          case ref: ThisType
-          if ref.isTracked && sym.isTerm =>
-            markPathFree(ref, PathSelectionProto(sym, pt, tree), tree)
+      if sym.exists && !sym.is(Package)
+          && !(sym.is(Method) && ctx.owner.isContainedIn(sym.owner.skipWeakOwner))
+            // if it's a method in some enclosing scope the call captures already cover the use set
+            // skipWeakOwner: Also exempt symbols in package objects of the source when referenced
+            // from classes in the same source.
+      then
+        // Mark symbol as used
+        //  - as a path if it is a member of some tracked object
+        //  - by itself if it is not a method
+        tree.tpe.stripped match
+          case TermRef(prefix: (TermRef | ThisType), _) if prefix.isTracked =>
+            markPathFree(prefix, PathSelectionProto(sym, pt, tree), tree)
           case _ =>
-            markPathFree(sym.termRef, pt, tree)
+            if !sym.is(Method) then
+              markPathFree(sym.termRef, pt, tree)
 
       if sym.isMutableVar && sym.owner.isTerm && pt != LhsProto then
         // When we have `var x: A^{c} = ...` where `x` is a local variable then
@@ -936,7 +942,27 @@ class CheckCaptures extends Recheck, SymTransformer:
      */
     protected override
     def recheckApplication(tree: Apply, qualType: Type, funType: MethodType, argTypes: List[Type])(using Context): Type =
-      val resultType = super.recheckApplication(tree, qualType, funType, argTypes)
+      val instArgs =
+        // Improve the argument types with which the method type is instantiated.
+        // If the rechecked argument type is an unboxed capturing type but the previous
+        // argument type is a singleton type, use the previous argument type instead.
+        // This makes sure path dependent types in the function result are still well-formed.
+        // An example is i25613.scala. See i16114.scala for an example why we have to
+        // exclude boxed capturing types because this might lose uses stemming from unboxing
+        // a function result.
+        if argTypes.hasSameLengthAs(tree.args) then
+          val argTypes1 = argTypes.zipWithConserve(tree.args):
+            case (nuType @ CapturingType(_, _), arg: Tree)
+            if arg.tpe.isStable            // stable --> there might be path dependent types with arg as prefix
+               && arg.tpe.isTrackableRef   // isTrackableRef --> we can get back original capture set by adaptation
+               && !nuType.isBoxedCapturing // !isBoxed --> no risk of losing uses when unboxing in result
+              => arg.tpe
+            case (nuType, _) => nuType
+          if argTypes1 ne argTypes then
+            capt.println(i"improve $argTypes to $argTypes1 in $tree")
+          argTypes1
+        else argTypes
+      val resultType = super.recheckApplication(tree, qualType, funType, instArgs)
       val appType = resultToAny(resultType, Origin.ResultInstance(funType, tree))
       val qualCaptures = qualType.captureSet
       val argCaptures =
@@ -949,7 +975,7 @@ class CheckCaptures extends Recheck, SymTransformer:
             && !resultType.isBoxedCapturing
             && !tree.fun.symbol.isConstructor
             && !resultType.captureSet.containsResultCapability
-            && !resultType.captureSet.elems.exists(_.derivesFromUnscoped)
+            && !resultType.captureSet.elems.exists(_.derivesFromCapTrait(defn.Caps_Unscoped))
             && qualCaptures.mightSubcapture(refs)
             && argCaptures.forall(_.mightSubcapture(refs)) =>
           val callCaptures = argCaptures.foldLeft(qualCaptures)(_ ++ _)
@@ -1286,6 +1312,9 @@ class CheckCaptures extends Recheck, SymTransformer:
         else if runInConstructor then
           pushConstructorEnv()
 
+        if sym.is(Synthetic) then
+          tree.tpt.putAttachment(SafeRefs.SkipAnnotsInType, ())
+
         checkInferredResult(super.recheckValDef(tree, sym), tree)
       finally
         if !sym.is(Param) then
@@ -1348,11 +1377,15 @@ class CheckCaptures extends Recheck, SymTransformer:
         SafeRefs.checkSafeAnnots(sym)
         for params <- tree.paramss; param <- params do
           SafeRefs.checkSafeAnnots(param.symbol)
-          param match
-            case param: ValDef => SafeRefs.checkSafeAnnotsInType(param.tpt)
-            case param: TypeDef => SafeRefs.checkSafeAnnotsInType(param.rhs)
+          if !param.symbol.is(Synthetic) then
+            param match
+              case param: ValDef => SafeRefs.checkSafeAnnotsInType(param.tpt)
+              case param: TypeDef => SafeRefs.checkSafeAnnotsInType(param.rhs)
 
         checkNoUnboxedReaches(tree)
+
+        if sym.is(Synthetic) then
+          tree.tpt.putAttachment(SafeRefs.SkipAnnotsInType, ())
 
         try checkInferredResult(super.recheckDefDef(tree, sym)(using bodyCtx), tree)
         finally
@@ -1362,32 +1395,6 @@ class CheckCaptures extends Recheck, SymTransformer:
             interpolateIfInferred(tree.tpt, sym)
           curEnv = saved
       }
-
-    def isScalaDocSnippet(sym: Symbol)(using Context): Boolean =
-      sym.is(ModuleClass)
-      && (sym.sourceModule.name == nme.Snippet)
-      && sym.owner.is(Package)
-      && sym.owner.name.toString.contains("snippet")
-
-    /** Is symbol exempt from checking that its type or uses clause must
-     *  be given explicitly? This is the case for symbols that are not
-     *  visible outside the compilation unit where they are defined,
-     *  and also for two pragmatic exemptions, explained below.
-     */
-    def isExemptFromExplicitChecks(sym: Symbol)(using Context): Boolean =
-      sym.isLocalToCompilationUnit
-      || isScalaDocSnippet(sym)
-      || sym.name.isReplWrapperName
-      || ctx.owner.enclosingPackageClass.isEmptyPackage
-        // We make an exception for symbols in the empty package.
-        // these could theoretically be accessed from other files in the empty package, but
-        // usually it would be too annoying to require explicit types.
-      || sym.name.is(DefaultGetterName)
-        // Default getters are exempted since otherwise it would be
-        // too annoying. This is a hole since a defualt getter's result type
-        // might leak into a type variable.
-      || sym.needsResultRefinement
-        // If we refine the result type anyway, the inferred type does not matter.
 
     /** Two tests for member definitions with inferred types:
      *
@@ -1436,7 +1443,9 @@ class CheckCaptures extends Recheck, SymTransformer:
       tree.tpt match
         case tpt: InferredTypeTree =>
           // Test point (1) of doc comment above
-          if !isExemptFromExplicitChecks(sym) then // Symbols that can't be seen outside the compilation unit can have inferred types
+          if !sym.isExemptFromExplicitChecks // Symbols that can't be seen outside the compilation unit can have inferred types
+              && !sym.needsResultRefinement  // If we refine the result type anyway, the inferred type does not matter
+          then // Symbols that can't be seen outside the compilation unit can have inferred types
             val expected = tpt.tpe.dropAllRetains
             todoAtPostCheck += { () =>
               withGlobalCapAsRoot:
@@ -1484,13 +1493,12 @@ class CheckCaptures extends Recheck, SymTransformer:
               if cl == defn.AnyClass then i"of unclassified type ${fld.info}"
               else i"classified as ${cl.typeRef}"
             report.error(
-              em"""$cls is classied as ${cls.classifier.typeRef} but has a field ${fld.name}
-                  |$fldClassifier.
+              em"""$cls is classied as ${cls.classifier.typeRef} but has a field ${fld.name} $fldClassifier.
                   |Field classifiers have to conform to the classifier of the containing class.""",
               cls.srcPos)
       // (2)
-      if !isExemptFromExplicitChecks(cls)
-          && !cls.derivesFrom(defn.Caps_Capability)
+      if !cls.isExemptFromExplicitChecks
+          && !cls.derivesFromCapability
           && capFields.nonEmpty
       then
         val fields =
@@ -2387,7 +2395,7 @@ class CheckCaptures extends Recheck, SymTransformer:
               else parent.nuType.captureSet.isExclusive()
             if parentIsExclusive && pcls != defn.Caps_ExclusiveCapability then
               val parentExclusivity =
-                if pcls.derivesFrom(defn.Caps_Capability)
+                if pcls.derivesFromCapability
                 then "is an exclusive capability"
                 else "retains exclusive capabilities"
               report.error(

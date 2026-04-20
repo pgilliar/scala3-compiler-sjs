@@ -10,7 +10,6 @@ import scala.util.control.NonFatal
 import dotty.tools.dotc.classpath.{ ClassPathFactory, PackageNameUtils }
 import dotty.tools.dotc.classpath.FileUtils.{hasTastyExtension, hasBetastyExtension}
 import dotty.tools.io.{ ClassPath, ClassRepresentation, AbstractFile, NoAbstractFile }
-import dotty.tools.backend.jvm.DottyBackendInterface.symExtensions
 
 import Contexts.*, Symbols.*, Flags.*, SymDenotations.*, Types.*, Scopes.*, Names.*
 import NameOps.*
@@ -153,7 +152,9 @@ object SymbolLoaders {
       def enterScanned(unit: CompilationUnit)(using Context) = {
 
         def checkPathMatches(path: List[TermName], what: String, tree: NameTree): Boolean = {
-          val ok = filePath == path
+          // Ignore empty packages if necessary so we don't warn on top-level package objects
+          // (such as `package object scala` in the top-level "package.scala" of the standard library)
+          val ok = filePath == path || filePath == path.filter(_ != nme.EMPTY_PACKAGE)
           if (!ok)
             report.warning(i"""$what ${tree.name} is in the wrong directory.
                            |It was declared to be in package ${path.reverse.mkString(".")}

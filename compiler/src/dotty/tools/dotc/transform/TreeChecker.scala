@@ -26,8 +26,6 @@ import staging.StagingLevel
 import inlines.Inlines.inInlineMethod
 import cc.RetainingAnnotation
 
-import dotty.tools.backend.jvm.DottyBackendInterface.symExtensions
-
 import scala.util.control.NonFatal
 
 /** Run by -Ycheck option after a given phase, this class retypes all syntax trees
@@ -823,6 +821,7 @@ object TreeChecker {
       assert((tp1 eq tp2) || (tp1 <:< tp2), {
         val mismatch = TypeMismatch(tp1, tp2, None)
         i"""|Type Mismatch (while checking $step):
+            |Position: ${tree.srcPos.sourcePos.showLineColumn}
             |${mismatch.message}${mismatch.explanation}
             |tree = $tree ${tree.className}""".stripMargin
       })
