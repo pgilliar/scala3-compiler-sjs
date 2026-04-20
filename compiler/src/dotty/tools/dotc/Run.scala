@@ -38,6 +38,7 @@ import Run.Progress
 import scala.compiletime.uninitialized
 import dotty.tools.dotc.transform.MegaPhase
 import dotty.tools.dotc.transform.Pickler.AsyncTastyHolder
+import dotty.tools.io.FileWriters
 import dotty.tools.dotc.util.chaining.*
 import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import java.util.{Timer, TimerTask}
@@ -298,6 +299,26 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
     _asyncTasty = Some(async)
     () => async.cancel()
 
+  /** Wait for async TASTy operations (including Zinc callbacks like
+   *  `apiPhaseCompleted`/`dependencyPhaseCompleted`) to complete and relay any
+   *  buffered reports. This must happen before we return to Zinc, which calls
+   *  `getCycleResultOnce` immediately after. See scala/scala3#25774.
+   */
+  private def syncAsyncTasty()(using Context): Unit =
+    for
+      async <- _asyncTasty
+      bufferedReporter <- async.sync()
+      report <- bufferedReporter.resetReports()
+    do
+      import reporting.Diagnostic
+      report match
+        case FileWriters.Report.Error(msg, pos) =>
+          ctx.reporter.report(Diagnostic.Error(msg(ctx), pos))
+        case FileWriters.Report.Warning(msg, pos) =>
+          ctx.reporter.report(Diagnostic.Warning(msg(ctx), pos))
+        case FileWriters.Report.Log(msg) =>
+          ctx.reporter.report(Diagnostic.Info(msg, NoSourcePosition))
+
   /** Will be set to true if any of the compiled compilation units contains
    *  a pureFunctions language import.
    */
@@ -433,6 +454,7 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
 
     showProgress(runPhases(allPhases = fusedPhases)(using runCtx))
     cancelAsyncTasty()
+    syncAsyncTasty()
 
     suppressions.runFinished()
     ctx.reporter.finalizeReporting()
@@ -558,7 +580,8 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
     super[ImplicitRunInfo].reset()
     super[ConstraintRunInfo].reset()
     super[CaptureRunInfo].reset()
-    myCtx = null
+    // TODO: This makes `runContext` unusable after being reset.
+    myCtx = null.asInstanceOf[Context]
     myUnits = Nil
     myUnitsCached = Nil
   }
@@ -593,11 +616,10 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
     start.setRun(this: @unchecked)
   }
 
-  private var myCtx: Context | Null = rootContext(using ictx)
+  private var myCtx: Context = rootContext(using ictx)
 
   /** The context created for this run */
-  given runContext[Dummy_so_its_a_def]: Context = myCtx.nn
-  assert(runContext.runId <= Periods.MaxPossibleRunId)
+  given runContext[Dummy_so_its_a_def]: Context = myCtx
 }
 
 object Run {
