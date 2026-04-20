@@ -231,7 +231,7 @@ class BackendUtils(val ppa: PostProcessorFrontendAccess, val ts: CoreBTypes)(usi
   def indyLambdaBodyMethods(hostClass: InternalName, method: MethodNode): Map[InvokeDynamicInsnNode, Handle] = {
     onIndyLambdaImplMethodIfPresent(hostClass)(ms => ms.getOrElse(method, Nil).toMap).getOrElse(Map.empty)
   }
-
+ 
   def isPredefLoad(insn: AbstractInsnNode): Boolean = BackendUtils.isModuleLoad(insn, _ == ts.PredefRef.internalName)
 
   // ==============================================================================================
@@ -689,7 +689,7 @@ object BackendUtils {
   def methodSignature(classInternalName: InternalName, method: MethodNode): String = {
     methodSignature(classInternalName, method.name, method.desc)
   }
-  
+
   def siteString(owner: String, method: String): String = {
     val c = owner.replace('/', '.').replaceAll("\\$+", ".").replaceAll("\\.$", "")
     if (method.isEmpty) c

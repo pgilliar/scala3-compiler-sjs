@@ -40,6 +40,7 @@ class PlainFile(val givenPath: Path) extends AbstractFile {
 
   val isDirectory: Boolean = givenPath.isDirectory
   def lastModified: Long = givenPath.lastModified
+  override def hasReliableMTime: Boolean = true
 
   def iterator: Iterator[AbstractFile] = {
     def existsFast(path: Path) = path match

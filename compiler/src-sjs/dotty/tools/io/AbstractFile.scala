@@ -85,6 +85,9 @@ abstract class AbstractFile extends Iterable[AbstractFile] {
 
   def lastModified: Long
 
+  /** Whether `lastModified` can be used to make freshness decisions. */
+  def hasReliableMTime: Boolean = false
+
   def input: InputStream
   def output: OutputStream
 

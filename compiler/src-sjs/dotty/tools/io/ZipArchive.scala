@@ -57,6 +57,7 @@ abstract class ZipArchive(override val jpath: JPath, release: Option[String]) ex
   self =>
 
   override def underlyingSource: Option[ZipArchive] = Some(this)
+  override def hasReliableMTime: Boolean = true
   def isDirectory: Boolean = true
   def lookupName(name: String, directory: Boolean): AbstractFile = unsupported()
   def lookupNameUnchecked(name: String, directory: Boolean): AbstractFile = unsupported()
@@ -67,6 +68,7 @@ abstract class ZipArchive(override val jpath: JPath, release: Option[String]) ex
   sealed abstract class Entry(path: String, val parent: Entry) extends VirtualFile(baseName(path), path):
     def getArchive: AnyRef = null
     override def underlyingSource: Option[ZipArchive] = Some(self)
+    override def hasReliableMTime: Boolean = true
     override def container: Entry = parent
     override def toString: String = self.path + "(" + path + ")"
 

@@ -16,7 +16,7 @@ import ast.Trees.{LambdaTypeTree, TypeBoundsTree}
 import Trees.Literal
 import Variances.Variance
 import annotation.tailrec
-import util.{SimpleIdentityMap, PlatformDependent, PlatformWeakMap}
+import util.{SimpleIdentityMap, PlatformWeakMap}
 import util.Stats
 import scala.util.control.NonFatal
 import config.Config
@@ -28,7 +28,6 @@ import scala.annotation.internal.sharable
 import scala.compiletime.uninitialized
 
 object SymDenotations {
-  import PlatformDependent.platformDependent
 
   /** A sym-denotation represents the contents of a definition
    *  during a period.
@@ -2626,14 +2625,10 @@ object SymDenotations {
                   ambiguityWarningIssued = true
               multi.filterWithPredicate(_.symbol.associatedFile == chosen)
 
-            platformDependent {
-              // pick the variant(s) from the youngest class file
+            if assocFiles.forall(_.hasReliableMTime) then
               pickYoungestAndWarn
-            } {
-              val haveReliableMtimes = assocFiles.exists(_.lastModified > 0L)
-              if haveReliableMtimes then pickYoungestAndWarn
-              else multi
-            }
+            else
+              multi
       end dropStale
 
       if name == nme.CONSTRUCTOR then

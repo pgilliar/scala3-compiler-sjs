@@ -22,18 +22,7 @@ case class Mode(val bits: Int) extends AnyVal {
   def isQuotedPattern: Boolean = (this & QuotedPatternBits) != None
 
   override def toString: String =
-    val sb = new StringBuilder("Mode(")
-    var first = true
-    var i = 0
-    while i < 31 do
-      if (bits & (1 << i)) != 0 then
-        if !first then sb.append(',')
-        sb.append(modeName(i))
-        first = false
-      i += 1
-    sb.append(')')
-    sb.toString
-
+    (0 until 31).filter(i => (bits & (1 << i)) != 0).map(modeName).mkString("Mode(", ",", ")")
   def ==(that: Mode): Boolean = this.bits == that.bits
   def !=(that: Mode): Boolean = this.bits != that.bits
 }

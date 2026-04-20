@@ -290,7 +290,7 @@ object Contexts {
           base.files(name) = file
           file
         catch
-          case ex: Exception =>
+          case ex: IllegalArgumentException =>
             report.error(em"invalid file path: ${ex.getMessage}")
             NoAbstractFile
 

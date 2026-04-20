@@ -227,11 +227,7 @@ object SymbolLoaders {
     }
 
   def needCompile(bin: AbstractFile, src: AbstractFile): Boolean =
-    platformDependent(src.lastModified >= bin.lastModified)({
-      val srcMtime = src.lastModified
-      val binMtime = bin.lastModified
-      srcMtime > 0L && binMtime > 0L && srcMtime >= binMtime
-    })
+    src.lastModified >= bin.lastModified
 
   private def nameOf(classRep: ClassRepresentation)(using Context): TermName =
     classRep.fileName.sliceToTermName(0, classRep.nameLength)

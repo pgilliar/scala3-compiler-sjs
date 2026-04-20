@@ -213,7 +213,7 @@ extends ImplicitRunInfo, ConstraintRunInfo, cc.CaptureRunInfo {
   private[tools] def registerEntryPoint(mainClass: String): Unit =
     myEntryPoints += mainClass
 
-  private[tools] def entryPoints: mutable.Set[String] =
+  private[tools] def entryPoints: mutable.HashSet[String] =
     myEntryPoints
 
   /** A cache for static references to packages and classes */

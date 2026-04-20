@@ -95,6 +95,8 @@ class VirtualFile(val name: String, override val path: String) extends AbstractF
   // with constant 0 to save the field.
   def lastModified: Long = 0
 
+  override def hasReliableMTime: Boolean = false
+
   /** Returns all abstract subfiles of this abstract directory. */
   def iterator: Iterator[AbstractFile] = {
     assert(isDirectory, "not a directory '" + this + "'")

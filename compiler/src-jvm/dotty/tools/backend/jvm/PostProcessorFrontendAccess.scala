@@ -24,7 +24,7 @@ sealed abstract class PostProcessorFrontendAccess(val ctx: FreshContext) {
   def getEntryPoints: List[String]
 
   def findClassFileAndModuleFile(name: String): Option[(io.AbstractFile, Option[io.AbstractFile])]
-  
+
   def optimizerWarning(msg: Context ?=> Message, site: String, pos: SrcPos): Unit =
     report.optimizerWarning(msg(using ctx), site, pos)(using ctx)
 
@@ -98,7 +98,7 @@ object PostProcessorFrontendAccess {
 
   }
 
-  class Impl(entryPoints: mutable.Set[String])(ctx: FreshContext) extends PostProcessorFrontendAccess(ctx) {
+  class Impl(entryPoints: mutable.HashSet[String])(ctx: FreshContext) extends PostProcessorFrontendAccess(ctx) {
     override def compilerSettings: CompilerSettings = _compilerSettings.get
     private lazy val _compilerSettings: Lazy[CompilerSettings] = perRunLazy(buildCompilerSettings(using ctx))
 
