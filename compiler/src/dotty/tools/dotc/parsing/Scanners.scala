@@ -96,7 +96,7 @@ object Scanners {
   }
 
   abstract class ScannerCommon(source: SourceFile)(using Context) extends CharArrayReader with TokenData {
-    val buf: Array[Char] = source.content
+    val buf: Array[Char] = source.content()
     def nextToken(): Unit
 
     // Errors -----------------------------------------------------------------

@@ -6,6 +6,7 @@ package dotc.classpath
 
 import java.io.{File => JFile, FileFilter}
 import java.net.URL
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import dotty.tools.io.AbstractFile
 
 /**
@@ -45,7 +46,12 @@ object FileUtils {
      */
     def hasSiblingTasty: Boolean =
       assert(file.hasClassExtension, s"non-class: $file")
-      file.resolveSibling(classNameToTasty(file.name)) != null
+      platformDependent {
+        file.resolveSibling(classNameToTasty(file.name)) != null
+      } {
+        val sibling = file.resolveSibling(classNameToTasty(file.name))
+        sibling != null && sibling.exists
+      }
   }
 
   extension (file: JFile) {
@@ -83,7 +89,8 @@ object FileUtils {
     else if (endsJava(fileName)) stripJavaExtension(fileName)
     else throw new FatalError("Unexpected source file ending: " + fileName)
 
-  def dirPath(forPackage: String): String = forPackage.replace('.', JFile.separatorChar)
+  def dirPath(forPackage: String): String =
+    forPackage.replace('.', platformDependent(JFile.separatorChar)('/'))
 
   def dirPathInJar(forPackage: String): String = forPackage.replace('.', '/')
 

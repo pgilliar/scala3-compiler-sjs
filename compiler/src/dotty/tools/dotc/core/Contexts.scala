@@ -43,6 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.nio.file.InvalidPathException
 import dotty.tools.dotc.coverage.Coverage
 import scala.annotation.tailrec
+import util.PlatformDependent.platformDependent
 
 object Contexts {
 
@@ -177,9 +178,13 @@ object Contexts {
       if local != null then op(local)
 
     def runZincPhases: Boolean =
-      def forceRun = settings.YdumpSbtInc.value || settings.YforceSbtPhases.value
-      val local = incCallback
-      local != null && local.enabled || forceRun
+      platformDependent {
+        val forceRun = settings.YdumpSbtInc.value || settings.YforceSbtPhases.value
+        val local = incCallback
+        local != null && local.enabled() || forceRun
+      } {
+        false
+      }
 
     /** The Zinc compile progress callback implementation if we are run from Zinc or used by presentation compiler, null otherwise */
     def progressCallback: ProgressCallback | Null = store(progressCallbackLoc)
@@ -256,7 +261,15 @@ object Contexts {
     /** Sourcefile corresponding to given abstract file, memoized */
     def getSource(file: AbstractFile, codec: => Codec = Codec(settings.encoding.value)) = {
       util.Stats.record("Context.getSource")
-      base.sources.getOrElseUpdate(file, SourceFile(file, codec))
+      base.sources.getOrElseUpdate(file,
+        platformDependent {
+          SourceFile(file, codec)
+        } {
+          if file == null then SourceFile(NoAbstractFile, Array.emptyCharArray)
+          else if !file.exists then SourceFile(file, Array.emptyCharArray)
+          else SourceFile(file, codec)
+        }
+      )
     }
 
     /** SourceFile with given path name, memoized */
@@ -277,7 +290,7 @@ object Contexts {
           base.files(name) = file
           file
         catch
-          case ex: InvalidPathException =>
+          case ex: IllegalArgumentException =>
             report.error(em"invalid file path: ${ex.getMessage}")
             NoAbstractFile
 
@@ -773,7 +786,7 @@ object Contexts {
       c._outer = NoContext
       c._period = InitialPeriod
       c._mode = Mode.None
-      c._typerState = TyperState.initialState()
+      c._typerState = TyperState.initialState(base.initialReporter)
       c._owner = NoSymbol
       c._tree = untpd.EmptyTree
       c._moreProperties = Map(MessageLimiter -> DefaultMessageLimiter())
@@ -909,6 +922,8 @@ object Contexts {
                        with Plugins {
 
     val settings: ScalaSettings = ScalaSettings
+
+    protected[dotc] def initialReporter: Reporter = new ConsoleReporter()
 
     /** The initial context */
     val initialCtx: Context = FreshContext.initial(this: @unchecked, settings)

@@ -8,6 +8,7 @@ import core.*
 import Contexts.*, Phases.*, Symbols.*, Decorators.*
 import Flags.PackageVal
 import staging.StagingLevel.*
+import util.PlatformDependent.platformDependent
 
 /** A MegaPhase combines a number of mini-phases which are all executed in
  *  a single tree traversal.
@@ -501,18 +502,22 @@ class MegaPhase(val miniPhases: Array[MiniPhase]) extends Phase {
    *  (which is a method of MiniPhase)
    */
   private def defines(phase: MiniPhase, name: String) = {
-    def hasRedefinedMethod(cls: Class[?]): Boolean =
-      if (cls.eq(classOf[MiniPhase])) false
-      else {
-        var clsMethods = clsMethodsCache.get(cls)
-        if (clsMethods == null) {
-          clsMethods = cls.getDeclaredMethods
-          clsMethodsCache.put(cls, clsMethods)
+    platformDependent {
+      def hasRedefinedMethod(cls: Class[?]): Boolean =
+        if (cls.eq(classOf[MiniPhase])) false
+        else {
+          var clsMethods = clsMethodsCache.get(cls)
+          if (clsMethods == null) {
+            clsMethods = cls.getDeclaredMethods
+            clsMethodsCache.put(cls, clsMethods)
+          }
+          clsMethods.nn.exists(_.nn.getName == name) ||
+          hasRedefinedMethod(cls.getSuperclass.nn)
         }
-        clsMethods.nn.exists(_.nn.getName == name) ||
-        hasRedefinedMethod(cls.getSuperclass.nn)
-      }
-    hasRedefinedMethod(phase.getClass)
+      hasRedefinedMethod(phase.getClass)
+    } {
+      true
+    }
   }
 
   private def newNxArray = new Array[MiniPhase | Null](miniPhases.length + 1)

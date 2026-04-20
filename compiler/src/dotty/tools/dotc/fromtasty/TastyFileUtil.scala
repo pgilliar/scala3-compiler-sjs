@@ -6,6 +6,7 @@ import dotty.tools.dotc.core.StdNames.nme.EMPTY_PACKAGE
 import dotty.tools.io.AbstractFile
 import dotty.tools.dotc.classpath.FileUtils.hasTastyExtension
 import dotty.tools.dotc.classpath.FileUtils.hasBetastyExtension
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 object TastyFileUtil {
   /** Get the class path of a tasty file
@@ -20,7 +21,7 @@ object TastyFileUtil {
   def getClassPath(file: AbstractFile, fromBestEffortTasty: Boolean = false): Option[String] =
     getClassName(file, fromBestEffortTasty).map { className =>
       val extension = if (fromBestEffortTasty) then ".betasty" else ".tasty"
-      val classInPath = className.replace(".", java.io.File.separator) + extension
+      val classInPath = className.replace(".", platformDependent(java.io.File.separator)("/")) + extension
       file.path.replace(classInPath, "")
     }
 
@@ -44,5 +45,4 @@ object TastyFileUtil {
       else
         s"${packageName.encode}.${className.lastPart.encode}"
 }
-
 

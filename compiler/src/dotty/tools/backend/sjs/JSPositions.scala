@@ -12,6 +12,7 @@ import dotty.tools.dotc.report
 
 import dotty.tools.dotc.util.{SourceFile, SourcePosition}
 import dotty.tools.dotc.util.Spans.Span
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 import dotty.tools.sjs.ir
 
@@ -78,21 +79,39 @@ class JSPositions()(using Context) {
     }
 
     private def convert(dotcSource: SourceFile): ir.Position.SourceFile = {
-      dotcSource.file.file match {
-        case null =>
-          new java.net.URI(
-              "virtualfile",        // Pseudo-Scheme
-              dotcSource.file.path, // Scheme specific part
-              null                  // Fragment
-          )
-        case file =>
-          val srcURI = file.toURI
-          sourceURIMaps.collectFirst {
-            case URIMap(from, to) if from.relativize(srcURI) != srcURI =>
-              val relURI = from.relativize(srcURI)
-              to.fold(relURI)(_.resolve(relURI))
-          }.getOrElse(srcURI)
-      }
+      platformDependent[ir.Position.SourceFile](
+        dotcSource.file.file match {
+          case null =>
+            new java.net.URI(
+                "virtualfile",        // Pseudo-Scheme
+                dotcSource.file.path, // Scheme specific part
+                null                  // Fragment
+            )
+          case file =>
+            val srcURI = file.toURI
+            sourceURIMaps.collectFirst {
+              case URIMap(from, to) if from.relativize(srcURI) != srcURI =>
+                val relURI = from.relativize(srcURI)
+                to.fold(relURI)(_.resolve(relURI))
+            }.getOrElse(srcURI)
+        }
+      )({
+        val rawPath = dotcSource.file.path
+        val srcURI =
+          try
+            val uri = new java.net.URI(rawPath)
+            if uri.getScheme != null then uri
+            else new java.net.URI("file", "", if rawPath.startsWith("/") then rawPath else "/" + rawPath, null)
+          catch
+            case _: Exception =>
+              new java.net.URI("virtualfile", rawPath, null)
+
+        sourceURIMaps.collectFirst {
+          case URIMap(from, to) if from.relativize(srcURI) != srcURI =>
+            val relURI = from.relativize(srcURI)
+            to.fold(relURI)(_.resolve(relURI))
+        }.getOrElse(srcURI)
+      })
     }
   }
 }

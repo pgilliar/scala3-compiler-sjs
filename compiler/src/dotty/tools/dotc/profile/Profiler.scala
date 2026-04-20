@@ -19,16 +19,21 @@ import dotty.tools.io.AbstractFile
 import annotation.internal.sharable
 import dotty.tools.dotc.core.Periods.InitialRunId
 import scala.collection.mutable.UnrolledBuffer
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 object Profiler {
   def apply()(using Context): Profiler =
-    if (!ctx.settings.YprofileEnabled.value) NoOpProfiler
-    else {
-      val reporter = if (ctx.settings.YprofileDestination.value != "")
-        new StreamProfileReporter(new PrintWriter(new FileWriter(ctx.settings.YprofileDestination.value, true)))
-      else ConsoleProfileReporter
-      new RealProfiler(reporter)
-    }
+    platformDependent(
+      if (!ctx.settings.YprofileEnabled.value) NoOpProfiler
+      else {
+        val reporter = if (ctx.settings.YprofileDestination.value != "")
+          new StreamProfileReporter(new PrintWriter(new FileWriter(ctx.settings.YprofileDestination.value, true)))
+        else ConsoleProfileReporter
+        new RealProfiler(reporter)
+      }
+    )(
+      NoOpProfiler
+    )
 
   final def NoOp: Profiler = NoOpProfiler
 
@@ -311,7 +316,7 @@ private [profile] class RealProfiler(reporter : ProfileReporter)(using Context) 
   override def beforeTypedDef(sym: Symbol): TracedEventId = traceDurationStart(Category.TypeCheck, symbolName(sym))
   override def afterTypedDef(event: TracedEventId): Unit = traceDurationEnd(Category.TypeCheck, event)
 
-  override def beforeImplicitSearch(pt: Type): TracedEventId = traceDurationStart(Category.Implicit, s"?[${symbolName(pt.typeSymbol)}]", colour = "yellow")
+  override def beforeImplicitSearch(pt: Type): TracedEventId = traceDurationStart(Category.Implicit, s"?[symbolName(pt.typeSymbol)}]", colour = "yellow")
   override def afterImplicitSearch(event: TracedEventId): Unit = traceDurationEnd(Category.Implicit, event, colour = "yellow")
 
   override def beforeInlineCall(inlineSym: Symbol): TracedEventId = traceDurationStart(Category.Inline, s"«${symbolName(inlineSym)}»", colour = "olive")

@@ -21,6 +21,8 @@ import io.AbstractFile
 import config.Config
 import config.Printers.overload
 import util.common.*
+import util.DebugTrace
+import util.PlatformDependent.platformDependent
 import typer.ProtoTypes.NoViewsAllowed
 import reporting.Message
 import collection.mutable.ListBuffer
@@ -304,7 +306,7 @@ object Denotations {
                       (using Context): Symbol =
       disambiguate(p) match {
         case m @ MissingRef(ownerd, name) if generateStubs =>
-          if ctx.settings.YdebugMissingRefs.value then m.ex.printStackTrace()
+          if ctx.settings.YdebugMissingRefs.value then DebugTrace.printThrowable(m.ex)
           newStubSymbol(ownerd.symbol, name)
         case NoDenotation | _: NoQualifyingRef | _: MissingRef =>
           def argStr = if (args.isEmpty) "" else i" matching ($args%, %)"

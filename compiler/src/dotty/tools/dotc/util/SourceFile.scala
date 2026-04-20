@@ -15,8 +15,8 @@ import scala.annotation.internal.sharable
 import scala.collection.mutable.ArrayBuffer
 import scala.compiletime.uninitialized
 import dotty.tools.dotc.util.chaining.*
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
-import java.io.File.separator
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{FileSystemException, Paths}
@@ -24,25 +24,41 @@ import java.util.Optional
 import java.util.regex.Pattern
 
 object ScriptSourceFile {
-  @sharable private val headerPattern = Pattern.compile("""^(::)?!#.*(\r|\n|\r\n)""", Pattern.MULTILINE)
   private val headerStarts  = List("#!", "::#!")
+  private val headerEnds = List("!#", "::!#")
 
   /** Return true if has a script header */
   def hasScriptHeader(content: Array[Char]): Boolean =
     headerStarts.exists(content.startsWith(_))
+
+  private def lineEnd(content: Array[Char], start: Int): Int =
+    var idx = start
+    while idx < content.length && content(idx) != '\n' && content(idx) != '\r' do
+      idx += 1
+    if idx >= content.length then idx
+    else if content(idx) == '\r' && idx + 1 < content.length && content(idx + 1) == '\n' then idx + 2
+    else idx + 1
+
+  private def startsWithAt(content: Array[Char], idx: Int, prefix: String): Boolean =
+    idx >= 0 && idx + prefix.length <= content.length && content.startsWith(prefix, idx)
+
+  private def headerLength(content: Array[Char]): Int =
+    if !hasScriptHeader(content) then 0
+    else
+      val firstLineEnd = lineEnd(content, 0)
+      var lineStart = firstLineEnd
+      while lineStart < content.length do
+        if headerEnds.exists(startsWithAt(content, lineStart, _)) then
+          return lineEnd(content, lineStart)
+        lineStart = lineEnd(content, lineStart)
+      firstLineEnd
 
   def apply(file: AbstractFile, content: Array[Char]): SourceFile = {
     /** Length of the script header from the given content, if there is one.
      *  The header begins with "#!" or "::#!" and is either a single line,
      *  or it ends with a line starting with "!#" or "::!#", if present.
      */
-    val headerLength =
-      if (headerStarts exists (content startsWith _)) {
-        val matcher = headerPattern.matcher(content.mkString)
-        if matcher.find then matcher.end
-        else content.indexOf('\n') // end of first line
-      }
-      else 0
+    val headerLength = ScriptSourceFile.headerLength(content)
 
     // overwrite hash-bang lines with all spaces to preserve line numbers
     val hashBangLines = content.take(headerLength).mkString.split("\\r?\\n")
@@ -55,7 +71,7 @@ object ScriptSourceFile {
         }
 
     new SourceFile(file, content) {
-      override val underlying = new SourceFile(this.file, this.content)
+      override val underlying = new SourceFile(this.file, this.content())
     }
   }
 }
@@ -82,18 +98,23 @@ object WrappedSourceFile:
         val result =
           if magicHeader.isEmpty then NoHeader
           else
-            val text = new String(sourceFile.content)
+            val text = new String(sourceFile.content())
             val headerQuoted = java.util.regex.Pattern.quote("///" + magicHeader)
             val regex = s"(?m)^$headerQuoted:(.+)$$".r
             regex.findFirstMatchIn(text) match
               case Some(m) =>
                 val sourceStartOffset = sourceFile.nextLine(m.start)
                 val file = ctx.getFile(m.group(1))
+
                 if file.exists then
                   HasHeader(sourceStartOffset, ctx.getSource(file))
                 else
-                  report.warning(em"original source file not found: ${file.path}")
-                  NoHeader
+                  platformDependent {
+                      report.warning(em"original source file not found: ${file.path}")
+                      NoHeader
+                  }{
+                    NoHeader
+                  }
               case None => NoHeader
         cache(sourceFile) = result
         result
@@ -117,7 +138,11 @@ class SourceFile(val file: AbstractFile, computeContent: => Array[Char]) extends
 
   override def name: String = file.name
   override def path: String = file.path
-  override def jfile: Optional[JFile] = Optional.ofNullable(file.file)
+  override def jfile: Optional[java.io.File] = platformDependent(
+    Optional.ofNullable(file.file.asInstanceOf[java.io.File | Null])
+  )(
+    Optional.empty[java.io.File]
+  )
 
   override def equals(that: Any): Boolean =
     (this `eq` that.asInstanceOf[AnyRef]) || {
@@ -230,7 +255,7 @@ class SourceFile(val file: AbstractFile, computeContent: => Array[Char]) extends
 
   /** The content of the line containing position `offset` */
   def lineContent(offset: Int): String =
-    content.slice(startOfLine(offset), nextLine(offset)).mkString
+    content().slice(startOfLine(offset), nextLine(offset)).mkString
 
   /** The column corresponding to `offset`, starting at 0 */
   def column(offset: Int): Int = {
@@ -260,14 +285,18 @@ object SourceFile {
    *  with the local separator converted to "/". The last element of the path will be the simple name of the file.
    */
   def virtual(name: String, content: String, maybeIncomplete: Boolean = false) =
-    SourceFile(new VirtualFile(name.replace(separator, "/"), content.getBytes(StandardCharsets.UTF_8)), content.toCharArray)
+    val normalizedName = platformDependent(
+      if java.io.File.separatorChar == '\\' then name.replace('\\', '/')
+      else name
+    )(name)
+    SourceFile(new VirtualFile(normalizedName, content.getBytes(StandardCharsets.UTF_8)), content.toCharArray)
       .tap(_._maybeInComplete = maybeIncomplete)
 
   /** A helper method to create a virtual source file for given URI.
    *  It relies on SourceFile#virtual implementation to create the virtual file.
    */
   def virtual(uri: URI, content: String): SourceFile =
-    SourceFile(new VirtualFile(Paths.get(uri), content.getBytes(StandardCharsets.UTF_8)), content.toCharArray)
+    SourceFile(new VirtualFile(uri.toString, content.getBytes(StandardCharsets.UTF_8)), content.toCharArray)
 
   /** Returns the relative path of `source` within the `reference` path
    *
@@ -279,30 +308,39 @@ object SourceFile {
     if jpath eq null then
       file.path // repl and other custom tests use abstract files with no path
     else
-      val sourcePath = jpath.toAbsolutePath.normalize
-      val refPath = java.nio.file.Paths.get(reference).toAbsolutePath.normalize
+      val sourcePathString = jpath.toAbsolutePath.normalize.toString
+      platformDependent {
+        val sourcePath = java.nio.file.Paths.get(sourcePathString).toAbsolutePath.normalize
+        val refPath = java.nio.file.Paths.get(reference).toAbsolutePath.normalize
 
-      if sourcePath.startsWith(refPath) then
-        // On Windows we can only relativize paths if root component matches
-        // (see implementation of sun.nio.fs.WindowsPath#relativize)
-        //
-        //     try refPath.relativize(sourcePath).toString
-        //     catch case _: IllegalArgumentException => sourcePath.toString
-        //
-        // As we already check that the prefix matches, the special handling for
-        // Windows is not needed.
+        if sourcePath.startsWith(refPath) then
+          // On Windows we can only relativize paths if root component matches
+          // (see implementation of sun.nio.fs.WindowsPath#relativize)
+          //
+          //     try refPath.relativize(sourcePath).toString
+          //     catch case _: IllegalArgumentException => sourcePath.toString
+          //
+          // As we already check that the prefix matches, the special handling for
+          // Windows is not needed.
 
-        // We also consistently use forward slashes as path element separators
-        // for relative paths. If we didn't do that, it'd be impossible to parse
-        // them back, as one would need to know whether they were created on Windows
-        // and use both slashes as separators, or on other OS and use forward slash
-        // as separator, backslash as file name character.
-
-        import scala.jdk.CollectionConverters.*
-        val path = refPath.relativize(sourcePath)
-        path.iterator.asScala.mkString("/")
-      else
-        jpath.toString
+          // We also consistently use forward slashes as path element separators
+          // for relative paths. If we didn't do that, it'd be impossible to parse
+          // them back, as one would need to know whether they were created on Windows
+          // and use both slashes as separators, or on other OS and use forward slash
+          // as separator, backslash as file name character.
+         import scala.jdk.CollectionConverters.*
+          val path = refPath.relativize(sourcePath)
+          path.iterator.asScala.mkString("/")
+        else
+          sourcePathString
+      } {
+        val sourcePath = sourcePathString
+        val refPath = dotty.tools.io.Path(reference).toAbsolute.toString
+        if sourcePath.startsWith(refPath) then
+          sourcePath.stripPrefix(refPath).stripPrefix("/")
+        else
+          sourcePath
+      }
   }
 
   /** Return true if file is a script:
@@ -312,12 +350,12 @@ object SourceFile {
     ScriptSourceFile.hasScriptHeader(content)
 
   def apply(file: AbstractFile | Null, codec: Codec): SourceFile =
-    // Files.exists is slow on Java 8 (https://rules.sonarsource.com/java/tag/performance/RSPEC-3725),
-    // so cope with failure.
     val chars =
+     // Files.exists is slow on Java 8 (https://rules.sonarsource.com/java/tag/performance/RSPEC-3725),
+      // so cope with failure.
       try new String(file.toByteArray, codec.charSet).toCharArray
       catch
-        case _: FileSystemException => Array.empty[Char]
+        case _: Exception => Array.empty[Char]
 
     if isScript(file, chars) then
       ScriptSourceFile(file, chars)

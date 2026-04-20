@@ -1423,6 +1423,19 @@ trait ParallelTesting extends RunnerOrchestration with CoverageSupport:
       tests.reduce(aggregate)
   end CompilationTest
 
+  private def recreateOutputDir(targetDir: JFile): JFile = {
+    if (targetDir.exists()) {
+      Using.resource(Files.walk(targetDir.toPath)) { paths =>
+        paths.iterator().asScala.toList
+          .sortBy(_.getNameCount)
+          .reverse
+          .foreach(Files.deleteIfExists)
+      }
+    }
+    targetDir.mkdirs()
+    targetDir
+  }
+
   /** Create out directory for directory `d` */
   def createOutputDirsForDir(d: JFile, sourceDir: JFile, outDir: JFile): JFile = {
     val targetDir = new JFile(outDir, s"${sourceDir.getName}/${d.getName}")

@@ -145,6 +145,9 @@ abstract class AbstractFile extends Iterable[AbstractFile] {
   /** Returns the time that this abstract file was last modified. */
   def lastModified: Long
 
+  /** Whether `lastModified` can be used to make freshness decisions. */
+  def hasReliableMTime: Boolean = true
+
   /** returns an input stream so the file can be read */
   def input: InputStream
 

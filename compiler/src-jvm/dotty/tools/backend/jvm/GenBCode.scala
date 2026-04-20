@@ -48,7 +48,7 @@ class GenBCode extends Phase { self =>
       val context = ctx match
         case fc: FreshContext => fc
         case ctx => ctx.fresh
-      _frontendAccess = PostProcessorFrontendAccess.Impl(entryPoints)(context)
+      _frontendAccess = PostProcessorFrontendAccess.Impl(ctx.run.nn.entryPoints)(context)
     _frontendAccess.nn
   }
 

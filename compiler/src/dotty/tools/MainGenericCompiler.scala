@@ -4,6 +4,7 @@ import scala.annotation.tailrec
 import scala.io.Source
 import scala.util.{Try, Success, Failure}
 import java.io.File
+import dotty.tools.dotc.util.PlatformDependent
 
 enum CompileMode:
   case Guess
@@ -121,7 +122,7 @@ object MainGenericCompiler {
       case CompileMode.Guess | CompileMode.Compile =>
         dotty.tools.dotc.Main.main(properArgs.toArray)
       case CompileMode.Decompile =>
-        dotty.tools.dotc.decompiler.Main.main(properArgs.toArray)
+        PlatformDependent.decompileMain(properArgs.toArray)
       case CompileMode.PrintTasty =>
         dotty.tools.dotc.core.tasty.TastyPrinter.main(properArgs.toArray)
       case CompileMode.Script => // Naive copy from scalac bash script

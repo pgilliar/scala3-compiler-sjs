@@ -3,7 +3,6 @@ package dotc
 package core
 
 import java.io.{IOException, File}
-import java.nio.channels.ClosedByInterruptException
 
 import scala.util.control.NonFatal
 
@@ -16,6 +15,7 @@ import NameOps.*
 import StdNames.*
 import classfile.{ClassfileParser, ClassfileTastyUUIDParser}
 import Decorators.*
+import util.PlatformDependent.platformDependent
 
 import util.Stats
 import reporting.trace
@@ -139,7 +139,7 @@ object SymbolLoaders {
   def enterToplevelsFromSource(
       owner: Symbol, name: PreName, src: AbstractFile,
       scope: Scope = EmptyScope)(using Context): Unit =
-    if src.exists && !src.isDirectory then
+    if platformDependent(src.exists && !src.isDirectory)(src.isVirtual && !src.isDirectory) then
       val completer = new SourcefileLoader(src)
       val filePath = owner.ownersIterator.takeWhile(!_.isRoot).map(_.name.toTermName).toList
 
@@ -158,7 +158,7 @@ object SymbolLoaders {
           if (!ok)
             report.warning(i"""$what ${tree.name} is in the wrong directory.
                            |It was declared to be in package ${path.reverse.mkString(".")}
-                           |But it is found in directory     ${filePath.reverse.mkString(File.separator)}""",
+                           |But it is found in directory     ${filePath.reverse.mkString(platformDependent(File.separator)("/"))}""",
               tree.srcPos.focus)
           ok
         }
@@ -439,8 +439,8 @@ abstract class SymbolLoader extends LazyType { self =>
     catch {
       case ex: InterruptedException =>
         throw ex
-      case ex: ClosedByInterruptException =>
-        throw new InterruptedException
+      case ex: IOException if ex.getClass.getName == "java.nio.channels.ClosedByInterruptException" =>
+        throw new InterruptedException()
       case ex: IOException =>
         signalError(ex)
       case NonFatal(ex: TypeError) =>

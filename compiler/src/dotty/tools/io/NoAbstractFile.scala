@@ -23,6 +23,7 @@ object NoAbstractFile extends AbstractFile {
   override def isVirtual: Boolean = true
   def iterator: Iterator[AbstractFile] = Iterator.empty
   def lastModified: Long = 0L
+  override def hasReliableMTime: Boolean = false
   def lookupName(name: String, directory: Boolean): AbstractFile = null
   def lookupNameUnchecked(name: String, directory: Boolean): AbstractFile = null
   def name: String = ""

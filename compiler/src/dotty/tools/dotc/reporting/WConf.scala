@@ -6,6 +6,7 @@ import scala.language.unsafeNulls
 
 import dotty.tools.dotc.core.Contexts.*
 import dotty.tools.dotc.util.{NoSourcePosition, SourcePosition}
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 import dotty.tools.dotc.interfaces.SourceFile
 import dotty.tools.dotc.reporting.MessageFilter.SourcePattern
 
@@ -28,10 +29,23 @@ enum MessageFilter:
       val noHighlight = message.msg.message.replaceAll("\\e\\[[\\d;]*[^\\d;]", "")
       pattern.findFirstIn(noHighlight).nonEmpty
     case SourcePattern(pattern) =>
-      val source = message.position.orElse(NoSourcePosition).source()
-      val path = source.jfile()
-        .map(_.toPath.toAbsolutePath.toUri.normalize().getRawPath)
-        .orElse(source.path())
+      def normalizeSourcePath(path: String): String =
+        try
+          val uri = new java.net.URI(path).normalize()
+          val raw = uri.getRawPath
+          if raw == null || raw.isEmpty then uri.toString
+          else raw
+        catch
+          case _: Exception => path.replace('\\', '/')
+
+      val source = message.position.orElse(NoSourcePosition).source
+      val path = platformDependent(
+        source.jfile
+          .map(_.toPath.toAbsolutePath.toUri.normalize().getRawPath)
+          .orElse(source.path)
+      )(
+        normalizeSourcePath(source.path)
+      )
       pattern.findFirstIn(path).nonEmpty
     case Origin(pattern) =>
       message match

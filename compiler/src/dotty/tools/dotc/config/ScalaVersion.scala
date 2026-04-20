@@ -111,7 +111,7 @@ case class SpecificScalaVersion(major: Int, minor: Int, rev: Int, build: ScalaBu
   /**
    * The version of the compiler running now
    */
-  val current: ScalaVersion = parse(util.Properties.versionNumberString).get
+  val current: ScalaVersion = parse(dotty.tools.dotc.config.Properties.versionNumberString).get
 }
 
 /**
@@ -183,4 +183,3 @@ object ScalaBuild {
     }
   }
 }
-

@@ -12,6 +12,7 @@ import collection.mutable
 import reporting.*
 import Checking.{checkNoPrivateLeaks, checkNoWildcard}
 import util.Property
+import util.DebugTrace
 import transform.Splicer
 
 trait TypeAssigner {
@@ -316,7 +317,7 @@ trait TypeAssigner {
       case err: ErrorType =>
         err
       case t =>
-        if (ctx.settings.Ydebug.value) new FatalError("").printStackTrace()
+        if ctx.settings.Ydebug.value then DebugTrace.printThrowable(new FatalError(""))
         errorType(err.takesNoParamsMsg(fn, ""), tree.srcPos)
     }
     val app = tree.withType(ownType)

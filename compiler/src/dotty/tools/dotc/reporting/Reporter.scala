@@ -9,6 +9,8 @@ import dotty.tools.dotc.reporting.Diagnostic.*
 import dotty.tools.dotc.reporting.Message.*
 import dotty.tools.dotc.rewrites.Rewrites
 import dotty.tools.dotc.util.NoSourcePosition
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
+import dotty.tools.dotc.util.DebugTrace
 
 import java.io.{BufferedReader, PrintWriter}
 import scala.annotation.internal.sharable
@@ -40,25 +42,34 @@ object Reporter {
 
   /** Show prompt if `-Xprompt` is passed as a flag to the compiler */
   def displayPrompt(reader: BufferedReader | Null, writer: PrintWriter): Unit = {
-    writer.println()
-    writer.print("a)bort, s)tack, r)esume: ")
-    writer.flush()
-    if (reader != null) {
-      def loop(): Unit = reader.read match {
-        case 'a' | 'A' =>
-          new Throwable().printStackTrace(writer)
-          System.exit(1)
-        case 's' | 'S' =>
-          new Throwable().printStackTrace(writer)
-          writer.println()
-          writer.flush()
-        case 'r' | 'R' =>
-          ()
-        case _ =>
-          loop()
+    platformDependent({
+      writer.println()
+      writer.print("a)bort, s)tack, r)esume: ")
+      writer.flush()
+      if (reader != null) {
+        def loop(): Unit = reader.read match {
+          case 'a' | 'A' =>
+            new Throwable().printStackTrace(writer)
+            System.exit(1)
+          case 's' | 'S' =>
+            new Throwable().printStackTrace(writer)
+            writer.println()
+            writer.flush()
+          case 'r' | 'R' =>
+            ()
+          case _ =>
+            loop()
+        }
+        loop()
       }
-      loop()
-    }
+    })(
+      if (writer != null) {
+        writer.println()
+        writer.println("a)bort, s)tack, r)esume: interactive prompt is unavailable on scala3-compiler-sjs; resuming.")
+        writer.println(DebugTrace.currentStackTraceString())
+        writer.flush()
+      }
+    )
   }
 }
 

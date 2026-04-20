@@ -2,12 +2,10 @@ package dotty.tools
 package dotc
 package core
 
-import java.security.MessageDigest
-import java.nio.CharBuffer
-import scala.io.Codec
 import Int.MaxValue
 import Names.*, StdNames.*, Contexts.*, Symbols.*, Flags.*, NameKinds.*, Types.*
 import util.Chars.{isOperatorPart, isIdentifierPart, digit2int}
+import util.HashDigests
 import Decorators.*
 import Definitions.*
 import nme.*
@@ -15,8 +13,6 @@ import nme.*
 object NameOps {
 
   object compactify {
-    lazy val md5: MessageDigest = MessageDigest.getInstance("MD5")
-
     inline val CLASSFILE_NAME_CHAR_LIMIT = 240
 
     /** COMPACTIFY
@@ -41,11 +37,7 @@ object NameOps {
       def toMD5(s: String, edge: Int): String = {
         val prefix = s.take(edge)
         val suffix = s.takeRight(edge)
-
-        val cs = s.toArray
-        val bytes = Codec.toUTF8(CharBuffer.wrap(cs))
-        md5.update(bytes)
-        val md5chars = md5.digest().map(b => (b & 0xFF).toHexString).mkString
+        val md5chars = HashDigests.md5HexUtf8(s)
 
         prefix + marker + md5chars + marker + suffix
       }

@@ -26,6 +26,7 @@ import scala.util.control.NonFatal
 import dotty.tools.dotc.classpath.FileUtils.hasSiblingTasty
 
 import scala.compiletime.uninitialized
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 object ClassfileParser {
 
@@ -1110,7 +1111,7 @@ class ClassfileParser(
 
         if (allowed != "always") {
           failUnless(allowed != "never")
-          val allowedList = allowed.split(java.io.File.pathSeparator).toList
+          val allowedList = allowed.split(platformDependent(java.io.File.pathSeparator)(":")).toList
           val file = classRoot.symbol.associatedFile
           // Using `.toString.contains` isn't great, but it's good enough for a debug flag.
           failUnless(file == null || allowedList.exists(path => file.toString.contains(path)))

@@ -2,6 +2,8 @@ package dotty.tools.dotc
 package config
 
 import Settings.Setting.ChoiceWithHelp
+import dotty.tools.io.{AbstractFile, Directory, PlainDirectory, NoAbstractFile}
+import dotty.tools.dotc.util.PlatformDependent.platformDependent
 
 object ScalaSettingsProperties:
 
@@ -13,7 +15,11 @@ object ScalaSettingsProperties:
     (minTargetVersion to maxTargetVersion).toList.map(_.toString)
 
   def supportedReleaseVersions: List[String] =
-    val jdkVersion = Runtime.version().feature()
+    val jdkVersion = platformDependent(
+      Runtime.version().feature()
+    )(
+      maxTargetVersion
+    )
     val maxVersion = Math.min(jdkVersion, maxTargetVersion)
     (minReleaseVersion to maxVersion).toList.map(_.toString)
 

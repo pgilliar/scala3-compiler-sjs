@@ -738,12 +738,12 @@ object Parsers {
     var possibleColonOffset: Int = -1
 
     def testChar(idx: Int, p: Char => Boolean): Boolean = {
-      val txt = source.content
+      val txt = source.content()
       idx >= 0 && idx < txt.length && p(txt(idx))
     }
 
     def testChar(idx: Int, c: Char): Boolean = {
-      val txt = source.content
+      val txt = source.content()
       idx >= 0 && idx < txt.length && txt(idx) == c
     }
 
@@ -1418,25 +1418,27 @@ object Parsers {
             case _ =>
           }
         import scala.util.FromDigits.*
-        val value =
-          try token match {
-            case INTLIT                        => intFromDigits(digits, in.base)
-            case LONGLIT                       => longFromDigits(digits, in.base)
-            case FLOATLIT                      => floatFromDigits(digits)
-            case DOUBLELIT | DECILIT | EXPOLIT => doubleFromDigits(digits)
-            case CHARLIT                       => in.strVal.head
-            case STRINGLIT | STRINGPART        => in.strVal
-            case TRUE                          => true
-            case FALSE                         => false
-            case NULL                          => null
-            case _                             =>
-              syntaxErrorOrIncomplete(IllegalLiteral())
-              null
-          }
-          catch {
-            case ex: FromDigitsException => syntaxErrorOrIncomplete(ex.getMessage.toMessage)
-          }
-        Literal(Constant(value))
+        def lit[T](value: T)(using Constant.ValueToConstant[T]): Tree =
+          Literal(Constant.fromValue(value))
+        try token match {
+          case INTLIT                         => lit(intFromDigits(digits, in.base))
+          case LONGLIT                        => lit(longFromDigits(digits, in.base))
+          case FLOATLIT                       => lit(floatFromDigits(digits))
+          case DOUBLELIT | DECILIT | EXPOLIT => lit(doubleFromDigits(digits))
+          case CHARLIT                        => lit(in.strVal.head)
+          case STRINGLIT | STRINGPART         => lit(in.strVal)
+          case TRUE                           => lit(true)
+          case FALSE                          => lit(false)
+          case NULL                           => lit(null)
+          case _                              =>
+            syntaxErrorOrIncomplete(IllegalLiteral())
+            lit(null)
+        }
+        catch {
+          case ex: FromDigitsException =>
+            syntaxErrorOrIncomplete(ex.getMessage.toMessage)
+            lit(null)
+        }
       }
 
       if (inStringInterpolation) {

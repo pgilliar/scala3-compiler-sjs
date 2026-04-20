@@ -21,7 +21,7 @@ import CheckRealizable.*
 import Variances.{Variance, setStructuralVariances, Invariant}
 import typer.Nullables
 import util.Stats.*
-import util.{SimpleIdentityMap, SimpleIdentitySet}
+import util.{SimpleIdentityMap, SimpleIdentitySet, PlatformRef}
 import ast.tpd.*
 import ast.TreeTypeMap
 import printing.Texts.*
@@ -36,7 +36,6 @@ import annotation.{tailrec, constructorOnly}
 import scala.util.hashing.{ MurmurHash3 => hashing }
 import config.Printers.{core, typr, matchTypes}
 import reporting.{trace, Message}
-import java.lang.ref.WeakReference
 import compiletime.uninitialized
 import ContextOps.isRechecking
 import cc.*
@@ -5078,13 +5077,13 @@ object Types extends TypeUtils {
     private[core] def resetInst(ts: TyperState): Unit =
       assert(inst.exists)
       inst = NoType
-      owningState = new WeakReference(ts)
+      owningState = PlatformRef(ts)
 
     /** The state owning the variable. This is at first `creatorState`, but it can
      *  be changed to an enclosing state on a commit.
      */
-    private[core] var owningState: WeakReference[TyperState] | Null =
-      if (creatorState == null) null else new WeakReference(creatorState)
+    private[core] var owningState: PlatformRef[TyperState] | Null =
+      if (creatorState == null) null else PlatformRef(creatorState)
 
     /** The nesting level of this type variable in the current typer state. This is usually
      *  the same as `initNestingLevel`, but can be decremented by calling `TyperState#setNestingLevel`.
