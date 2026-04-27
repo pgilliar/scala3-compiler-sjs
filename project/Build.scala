@@ -1887,6 +1887,7 @@ object Build {
             libsDir / "scala-lib",
             libsDir / "scalajs-lib",
           ),
+          (Compile / fullClasspath).value.map(_.data),
           Seq(
             (`scala3-compiler-nonbootstrapped` / Compile / packageBin).value,
             (`scala3-interfaces` / Compile / packageBin).value,

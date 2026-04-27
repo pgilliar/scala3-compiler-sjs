@@ -3,12 +3,20 @@ package dotc
 package core
 
 import dotty.tools.dotc.ast.tpd
+import dotty.tools.backend.sjs.JSEncoding.{encodeClassName, toParamOrResultTypeRef, toTypeRef}
+import dotty.tools.dotc.core.Decorators.*
+import dotty.tools.dotc.core.TypeErasure.fullErasure
+import dotty.tools.dotc.core.Types.*
 import dotty.tools.dotc.inlines.Inlines
 import dotty.tools.dotc.quoted.Interpreter.Call
-import dotty.tools.io.{AbstractFile, NoAbstractFile}
+import dotty.tools.dotc.sjsmacros.{MacroRuntimeExports, MacroRuntimeId}
+import dotty.tools.sjs.ir
+import dotty.tools.sjs.ir.{ClassKind, Position, Trees => js, Types => jstpe, WellKnownNames => jswkn}
+import dotty.tools.sjs.ir.Names.{ClassName, LocalName, MethodName, SimpleMethodName}
+import dotty.tools.sjs.ir.OriginalName.NoOriginalName
+import dotty.tools.sjs.ir.Version.Unversioned
 
-import java.io.OutputStreamWriter
-import java.nio.charset.StandardCharsets.UTF_8
+import java.io.ByteArrayOutputStream
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
@@ -19,68 +27,53 @@ import Symbols.*
 
 object MacroClassPathScanner:
 
-  final case class MacroPayload(
-    names: IArray[String],
-    implementations: IArray[Option[String]],
-  ):
-    require(names.length == implementations.length, "macro payload arrays must have the same length")
+  final case class MacroEntryPoint(
+    id: String,
+    implementationOwnerClassName: ClassName,
+    implementationMethod: js.MethodIdent,
+    implementationResultType: jstpe.Type,
+    implementationParamTypes: IArray[jstpe.Type],
+  )
 
-    def toJson(packageName: String): String =
-      val sb = new StringBuilder
-      sb.append("{\n")
-      sb.append("  \"formatVersion\": 1,\n")
-      sb.append("  \"package\": ")
-      appendJsonString(sb, packageName)
-      sb.append(",\n")
-      sb.append("  \"names\": ")
-      appendJsonArray(sb, names.iterator.map(Some(_)))
-      sb.append(",\n")
-      sb.append("  \"implementations\": ")
-      appendJsonArray(sb, implementations.iterator)
-      sb.append("\n}\n")
-      sb.toString
+  final case class SerializedMacroEntryPointsIR(
+    packageName: String,
+    path: String,
+    bytes: Array[Byte],
+  )
 
-  def rawEntriesInPackage(packageName: String)(using Context): List[String] =
-    val entries = ctx.platform.classPath.list(packageName)
-    val packages =
-      entries.packages.iterator
-        .map(pkg => s"package name=${pkg.name}")
-    val classesAndSources =
-      entries.classesAndSources.iterator
-        .map { classRep =>
-          val binary = classRep.binary.map(_.path).getOrElse("<none>")
-          val source = classRep.source.map(_.path).getOrElse("<none>")
-          s"class name=${classRep.name} file=${classRep.fileName} binary=${binary} source=${source}"
-        }
-    (packages ++ classesAndSources).toList.sorted
-
-  def macroPayloadInPackage(packageName: String)(using Context): MacroPayload =
-    val macros = findMacroSymbolsInPackage(packageName).sortBy(stableId)
-    MacroPayload(
-      names = IArray.from(macros.iterator.map(stableId)),
-      implementations = IArray.from(macros.iterator.map(implementationStableId)),
-    )
-
-  def emitMacroPayload(packageName: String)(using Context): Option[AbstractFile] =
-    val outputRoot = ctx.settings.outputDir.value
-    if outputRoot == null || outputRoot == NoAbstractFile then None
-    else
-      val target = payloadFile(outputRoot, packageName)
-      val writer = new OutputStreamWriter(target.output, UTF_8)
-      try writer.write(macroPayloadInPackage(packageName).toJson(packageName))
-      finally writer.close()
-      Some(target)
-
-  private def stableId(symbol: TermSymbol)(using Context): String =
-    s"${symbol.owner.binaryClassName}#${symbol.fullName}${symbol.signature}"
-
-  private def implementationStableId(symbol: TermSymbol)(using Context): Option[String] =
-    implementationSymbolOf(symbol).map(stableId)
+  def serializedMacroEntryPointsIRInPackage(packageName: String)(using Context): List[SerializedMacroEntryPointsIR] =
+    macroEntryPointsClassDefsInPackage(packageName).map { classDef =>
+      SerializedMacroEntryPointsIR(
+        packageName = packageName,
+        path = entryPointsIRPath(classDef.name.name),
+        bytes = serializeClassDef(classDef),
+      )
+    }
 
   private def implementationSymbolOf(symbol: TermSymbol)(using Context): Option[TermSymbol] =
     val body = Inlines.bodyToInline(symbol)
     if body.isEmpty then None
     else extractImplementation(body)
+
+  private def macroEntryPointsInPackage(packageName: String)(using Context): List[MacroEntryPoint] =
+    findMacroSymbolsInPackage(packageName)
+      .sortBy(MacroRuntimeId.stableId)
+      .flatMap { symbol =>
+        implementationSymbolOf(symbol).map { implementation =>
+          given Position = Position.NoPosition
+          val implementationOwnerClassName = encodeClassName(implementation.owner)
+          val implementationMethod = methodIdentOf(implementation)
+          val implementationResultType = irTypeOfMethodResult(implementationMethod)
+          val implementationParamTypes = irTypesOfMethodParams(implementationMethod)
+          MacroEntryPoint(
+            id = MacroRuntimeId.stableId(symbol),
+            implementationOwnerClassName = implementationOwnerClassName,
+            implementationMethod = implementationMethod,
+            implementationResultType = implementationResultType,
+            implementationParamTypes = implementationParamTypes,
+          )
+        }
+      }
 
   private def extractImplementation(tree: tpd.Tree)(using Context): Option[TermSymbol] =
     import tpd.*
@@ -163,42 +156,169 @@ object MacroClassPathScanner:
     packageRoots.foreach(scanPackage)
     seenMethods.toList
 
-  private def payloadFile(outputRoot: AbstractFile, packageName: String): AbstractFile =
-    macroArtifactsDir(outputRoot, packageName).fileNamed("payload.json")
+  private def entryPointsIRPath(className: ClassName): String =
+    s"${className.nameString.split('.').iterator.filter(_.nonEmpty).mkString("/")}.sjsir"
 
-  private def macroArtifactsDir(outputRoot: AbstractFile, packageName: String): AbstractFile =
-    val base = outputRoot.subdirectoryNamed("META-INF").subdirectoryNamed("classpath-macros")
-    if packageName.isEmpty then base.subdirectoryNamed("_root_")
-    else packageName.split('.').iterator.filter(_.nonEmpty).foldLeft(base)(_.subdirectoryNamed(_))
+  private def serializeClassDef(classDef: js.ClassDef): Array[Byte] =
+    val output = new ByteArrayOutputStream()
+    try ir.Serializers.serialize(output, ir.Hashers.hashClassDef(classDef))
+    finally output.close()
+    output.toByteArray
 
-  private def appendJsonArray(sb: StringBuilder, values: Iterator[Option[String]]): Unit =
-    sb.append('[')
-    var first = true
-    values.foreach { value =>
-      if !first then sb.append(", ")
-      value match
-        case Some(str) => appendJsonString(sb, str)
-        case None => sb.append("null")
-      first = false
-    }
-    sb.append(']')
+  private def generatedPackageName(packageName: String): String =
+    if packageName.isEmpty then "dotty.tools.dotc.sjsmacros.generated._root_"
+    else s"dotty.tools.dotc.sjsmacros.generated.$packageName"
 
-  private def appendJsonString(sb: StringBuilder, value: String): Unit =
-    sb.append('"')
-    value.foreach {
-      case '"'  => sb.append("\\\"")
-      case '\\' => sb.append("\\\\")
-      case '\b' => sb.append("\\b")
-      case '\f' => sb.append("\\f")
-      case '\n' => sb.append("\\n")
-      case '\r' => sb.append("\\r")
-      case '\t' => sb.append("\\t")
-      case ch if ch < ' ' =>
-        val hex = Integer.toHexString(ch.toInt)
-        sb.append("\\u")
-        0.until(4 - hex.length).foreach(_ => sb.append('0'))
-        sb.append(hex)
-      case ch =>
-        sb.append(ch)
-    }
-    sb.append('"')
+  private def generatedClassName(packageName: String, simpleName: String): ClassName =
+    ClassName(s"${generatedPackageName(packageName)}.$simpleName")
+
+  private def macroEntryPointsClassDefsInPackage(packageName: String)(using Context): List[js.ClassDef] =
+    val entries = macroEntryPointsInPackage(packageName)
+    if entries.isEmpty then Nil
+    else
+      val moduleClassName = generatedClassName(packageName, "MacroEntryPoints$")
+      implicit val pos: Position = Position.NoPosition
+      List(macroEntryPointsModuleClassDef(packageName, moduleClassName, entries))
+
+  private def macroEntryPointsModuleClassDef(packageName: String, moduleClassName: ClassName, entries: List[MacroEntryPoint])(using Context, Position): js.ClassDef =
+    val moduleType = jstpe.ClassType(moduleClassName, nullable = true)
+    val moduleTypeNonNull = jstpe.ClassType(moduleClassName, nullable = false)
+    val writeReplaceName = js.MethodIdent(MethodName("writeReplace", Nil, jswkn.ObjectRef))
+    val moduleSerializationProxyClass = encodeClassName(defn.ModuleSerializationProxyClass)
+    val writeReplaceCtor = js.MethodIdent(MethodName.constructor(List(jstpe.ClassRef(jswkn.ClassClass))))
+    val ctorMethod = js.MethodIdent(jswkn.NoArgConstructorName)
+    val thisRef = js.This()(moduleTypeNonNull)
+
+    js.ClassDef(
+      js.ClassIdent(moduleClassName),
+      NoOriginalName,
+      ClassKind.ModuleClass,
+      None,
+      Some(js.ClassIdent(jswkn.ObjectClass)),
+      Nil,
+      None,
+      None,
+      Nil,
+      List(
+        js.MethodDef(
+          js.MemberFlags.empty.withNamespace(js.MemberNamespace.Constructor),
+          ctorMethod,
+          NoOriginalName,
+          Nil,
+          jstpe.VoidType,
+          Some(
+            js.Block(
+              List(
+                js.ApplyStatically(
+                  js.ApplyFlags.empty.withConstructor(true),
+                  thisRef,
+                  jswkn.ObjectClass,
+                  js.MethodIdent(jswkn.NoArgConstructorName),
+                  Nil,
+                )(jstpe.VoidType),
+                js.StoreModule(),
+              )
+            )
+          ),
+        )(js.OptimizerHints.empty, Unversioned),
+        js.MethodDef(
+          js.MemberFlags.empty.withNamespace(js.MemberNamespace.Private),
+          writeReplaceName,
+          NoOriginalName,
+          Nil,
+          jstpe.AnyType,
+          Some(
+            js.New(
+              moduleSerializationProxyClass,
+              writeReplaceCtor,
+              List(js.ClassOf(jstpe.ClassRef(moduleClassName))),
+            )
+          ),
+        )(js.OptimizerHints.empty, Unversioned),
+      ),
+      None,
+      Nil,
+      Nil,
+      List(macroEntryPointsTopLevelExport(packageName, entries)),
+    )(js.OptimizerHints.empty)
+
+  private def macroEntryPointsTopLevelExport(packageName: String, entries: List[MacroEntryPoint])(using Context, Position): js.TopLevelExportDef =
+    val exportName = MacroRuntimeExports.entryPointsExportName(packageName)
+    val exportBody = js.JSArrayConstr(entries.map(exportedEntryPointValue))
+    val methodDef = js.JSMethodDef(
+      js.MemberFlags.empty.withNamespace(js.MemberNamespace.PublicStatic),
+      js.StringLiteral(exportName),
+      Nil,
+      None,
+      exportBody,
+    )(js.OptimizerHints.empty, Unversioned)
+    js.TopLevelMethodExportDef(jswkn.DefaultModuleID, methodDef)
+
+  private def exportedEntryPointValue(entry: MacroEntryPoint)(using Context, Position): js.Tree =
+    js.JSArrayConstr(
+      List(
+        js.StringLiteral(entry.id),
+        exportedEntryPointFunction(entry),
+      )
+    )
+
+  private def exportedEntryPointFunction(entry: MacroEntryPoint)(using Context, Position): js.Tree =
+    val argsParam = js.ParamDef(js.LocalIdent(LocalName("args")), NoOriginalName, jstpe.AnyType, mutable = false)
+
+    def argAt(paramIndex: Int, targetType: jstpe.Type): js.Tree =
+      js.AsInstanceOf(
+        js.JSSelect(argsParam.ref, js.StringLiteral(paramIndex.toString)),
+        targetType,
+      )
+
+    val applyArgs =
+      entry.implementationParamTypes.iterator.zipWithIndex.map { (targetType, paramIndex) =>
+        argAt(paramIndex, targetType)
+      }.toList
+
+    js.Closure(
+      js.ClosureFlags.arrow,
+      Nil,
+      List(argsParam),
+      None,
+      jstpe.AnyType,
+      js.Apply(
+        js.ApplyFlags.empty,
+        js.LoadModule(entry.implementationOwnerClassName),
+        entry.implementationMethod,
+        applyArgs,
+      )(entry.implementationResultType),
+      Nil,
+    )
+
+  private def irTypesOfMethodParams(method: js.MethodIdent): IArray[jstpe.Type] =
+    IArray.from(method.name.paramTypeRefs.iterator.map(irTypeOfTypeRef))
+
+  private def irTypeOfMethodResult(method: js.MethodIdent): jstpe.Type =
+    irTypeOfTypeRef(method.name.resultTypeRef)
+
+  private def methodIdentOf(symbol: TermSymbol)(using Context): js.MethodIdent =
+    given Position = Position.NoPosition
+    val paramTypeRefs =
+      symbol.info.paramInfoss.flatten.map { paramType =>
+        toParamOrResultTypeRef(toTypeRef(fullErasure(paramType)))
+      }
+    val resultTypeRef =
+      if symbol.isClassConstructor then jstpe.VoidRef
+      else toParamOrResultTypeRef(toTypeRef(fullErasure(symbol.info.finalResultType)))
+    val methodName =
+      if symbol.isClassConstructor then MethodName.constructor(paramTypeRefs)
+      else MethodName(SimpleMethodName(symbol.name.mangledString), paramTypeRefs, resultTypeRef)
+    js.MethodIdent(methodName)
+
+  private def irTypeOfTypeRef(typeRef: jstpe.TypeRef): jstpe.Type = typeRef match
+    case jstpe.PrimRef(irTpe) =>
+      irTpe
+    case jstpe.ClassRef(className) if className == jswkn.ObjectClass =>
+      jstpe.AnyType
+    case jstpe.ClassRef(className) =>
+      jstpe.ClassType(className, nullable = true)
+    case arrayTypeRef: jstpe.ArrayTypeRef =>
+      jstpe.ArrayType(arrayTypeRef, nullable = true)
+    case transientTypeRef: jstpe.TransientTypeRef =>
+      transientTypeRef.tpe

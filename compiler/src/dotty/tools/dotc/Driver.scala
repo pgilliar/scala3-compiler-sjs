@@ -4,13 +4,14 @@ import dotty.tools.FatalError
 import config.CompilerCommand
 import core.Comments.{ContextDoc, ContextDocstrings}
 import core.Contexts.*
-import core.{MacroClassLoader, MacroClassPathScanner, TypeError}
+import core.{MacroClassLoader, TypeError}
 import dotty.tools.dotc.ast.Positioned
 import dotty.tools.io.{AbstractFile, File, FileExtension}
 import reporting.*
 import core.Decorators.*
 import util.chaining.*
 import util.PlatformDependent.platformDependent
+import dotty.tools.dotc.sjsmacros.{MacroRuntimeRegistry, MissingMacroEntryPointException}
 
 import scala.util.control.NonFatal
 import fromtasty.{TASTYCompiler, TastyFileUtil}
@@ -23,34 +24,12 @@ import fromtasty.{TASTYCompiler, TastyFileUtil}
  */
 class Driver {
 
-  private def emitClasspathMacros(using Context): Unit =
-    val packageName = ctx.settings.YemitClasspathMacros.value
-    if packageName.nonEmpty then
-      MacroClassPathScanner.emitMacroPayload(packageName) match
-        case Some(file) =>
-          report.echo(s"[classpath-macros] wrote payload ${file.path}")
-        case None =>
-          report.echo(s"[classpath-macros] skipped payload emission for package `$packageName`: output directory unavailable")
-
-  private def printClasspathMacros(using Context): Unit =
-    val packageName = ctx.settings.YprintClasspathMacros.value
-    if packageName.nonEmpty then
-      val rawEntries = MacroClassPathScanner.rawEntriesInPackage(packageName)
-      if rawEntries.isEmpty then
-        report.echo(s"[classpath-macros] raw list empty under package `$packageName`")
-      else
-        rawEntries.foreach(entry => report.echo(s"[classpath-macros] raw $entry"))
-
-      val payload = MacroClassPathScanner.macroPayloadInPackage(packageName)
-      report.echo(s"[classpath-macros] payload.names=${payload.names.mkString("[", ", ", "]")}")
-      report.echo(
-        s"[classpath-macros] payload.impls=${payload.implementations.iterator.map {
-            case Some(impl) => impl
-            case None => "<missing>"
-          }.mkString("[", ", ", "]")}"
-      )
-      if payload.names.isEmpty then
-        report.echo(s"[classpath-macros] no macros found under package `$packageName`")
+  private def throwMissingMacroEntryPointsIfAny(): Unit =
+    platformDependent[Unit](()) {
+      MacroRuntimeRegistry.missingEntryPointsException match
+        case Some(ex) => throw ex
+        case None => ()
+    }
 
   protected def newCompiler(using Context): Compiler =
     platformDependent(
@@ -68,11 +47,12 @@ class Driver {
       try
         val run = compiler.newRun
         runOrNull = run
-        emitClasspathMacros(using run.runContext)
-        printClasspathMacros(using run.runContext)
         run.compile(files)
+        throwMissingMacroEntryPointsIfAny()
         finish(compiler, run)
       catch
+        case ex: MissingMacroEntryPointException =>
+          throw ex
         case ex: FatalError =>
           report.error(ex.getMessage) // signals that we should fail compilation.
         case ex: Throwable if ctx.usedBestEffortTasty =>
@@ -98,8 +78,8 @@ class Driver {
       val run1 = compiler.newRun
       run1.compileSuspendedUnits(suspendedUnits, !run.suspendedAtTyperPhase)
       val nextCtx = ctx.fresh
-      // TODO SJS : macro class loader equivalent
       val _ = platformDependent[Unit]({ MacroClassLoader.init(nextCtx); () })(())
+      throwMissingMacroEntryPointsIfAny()
       finish(compiler, run1)(using nextCtx)
 
   protected def initCtx: Context = (new ContextBase).initialCtx
@@ -115,11 +95,13 @@ class Driver {
    *  this method returns a list of files to compile and an updated Context.
    *  If compilation should be interrupted, this method returns None.
    */
-  def setup(args: Array[String], rootCtx: Context): Option[(List[AbstractFile], Context)] = {
+  def setup(args: Array[String], rootCtx: Context): Option[(List[AbstractFile], Context)] =
+    setup(args, rootCtx, sourcesRequired)
+
+  protected def setup(args: Array[String], rootCtx: Context, sourcesRequired: Boolean): Option[(List[AbstractFile], Context)] = {
     val ictx = rootCtx.fresh
     val summary = command.distill(args, ictx.settings)(ictx.settingsState)(using ictx)
     ictx.setSettings(summary.sstate)
-    // TODO SJS : macro class loader equivalent
     val _ = platformDependent[Unit]({ MacroClassLoader.init(ictx); () })(())
     Positioned.init(using ictx)
 

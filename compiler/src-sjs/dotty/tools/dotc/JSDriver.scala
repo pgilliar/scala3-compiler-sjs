@@ -17,3 +17,6 @@ abstract class JSDriver extends Driver:
 
   override def setup(args: Array[String], rootCtx: Context): Option[(List[dotty.tools.io.AbstractFile], Context)] =
     super.setup(ensureScalaJSMode(args), rootCtx)
+
+  override protected def setup(args: Array[String], rootCtx: Context, sourcesRequired: Boolean): Option[(List[dotty.tools.io.AbstractFile], Context)] =
+    super.setup(ensureScalaJSMode(args), rootCtx, sourcesRequired)
