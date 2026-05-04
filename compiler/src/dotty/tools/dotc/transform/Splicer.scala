@@ -9,6 +9,7 @@ import dotty.tools.dotc.ast.tpd
 import dotty.tools.dotc.core.Contexts.*
 import dotty.tools.dotc.core.Decorators.*
 import dotty.tools.dotc.core.Flags.*
+import dotty.tools.dotc.core.MacroClassPathScanner
 import dotty.tools.dotc.core.NameKinds.FlatName
 import dotty.tools.dotc.core.Names.Name
 import dotty.tools.dotc.core.StdNames.*
@@ -366,7 +367,10 @@ object Splicer {
           MacroRuntimeRegistry.invoke(macroId, interpretArgs(args, fn.symbol.info).toArray).asInstanceOf[Object]
         else
           val packageName = MacroRuntimeExports.packageNameFromMacroId(macroId)
-          MacroRuntimeRegistry.noteMissing(macroId, packageName)
+          val entryPointsIR =
+            try MacroClassPathScanner.serializedMacroEntryPointsIRInPackage(packageName)
+            catch case NonFatal(_) => Nil
+          MacroRuntimeRegistry.noteMissing(macroId, packageName, entryPointsIR)
           throw new MissingMacroEntryPointException(macroId, packageName)
 
       case _ =>

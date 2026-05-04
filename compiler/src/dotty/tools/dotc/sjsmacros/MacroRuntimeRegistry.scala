@@ -1,10 +1,12 @@
 package dotty.tools.dotc.sjsmacros
 
+import dotty.tools.dotc.core.MacroClassPathScanner.SerializedMacroEntryPointsIR
+
 import scala.collection.mutable
 
 object MacroRuntimeRegistry:
   private val registered = mutable.LinkedHashMap.empty[String, Array[Any] => Any]
-  private val missing = mutable.LinkedHashMap.empty[String, String]
+  private val missing = mutable.LinkedHashMap.empty[String, MissingMacroEntryPoint]
   private var resolver: Option[String => Boolean] = None
 
   def clearAll(): Unit =
@@ -15,11 +17,15 @@ object MacroRuntimeRegistry:
   def setDefaultResolver(f: String => Boolean): Unit =
     resolver = Some(f)
 
-  def noteMissing(id: String, packageName: String): Unit =
-    missing.getOrElseUpdate(id, packageName)
+  def noteMissing(id: String, packageName: String, entryPointsIR: List[SerializedMacroEntryPointsIR] = Nil): Unit =
+    missing.get(id) match
+      case Some(existing) if existing.entryPointsIR.nonEmpty || entryPointsIR.isEmpty =>
+        ()
+      case _ =>
+        missing(id) = MissingMacroEntryPoint(id, packageName, entryPointsIR)
 
   def missingEntryPoints: List[MissingMacroEntryPoint] =
-    missing.iterator.map { (id, packageName) => MissingMacroEntryPoint(id, packageName) }.toList
+    missing.values.toList
 
   def missingEntryPointsException: Option[MissingMacroEntryPointException] =
     val requests = missingEntryPoints

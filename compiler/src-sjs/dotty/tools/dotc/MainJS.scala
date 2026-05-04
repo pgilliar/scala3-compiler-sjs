@@ -2,9 +2,10 @@ package dotty.tools
 package dotc
 
 import dotty.tools.dotc.sjsmacros.{MacroRuntimeExports, MacroRuntimeRegistry, MissingMacroEntryPointException}
+import dotty.tools.dotc.sjsmacros.host.SjsBrowserMacroLinker
 import dotty.tools.dotc.core.MacroClassPathScanner
 import scala.scalajs.js
-import scala.scalajs.js.annotation.JSExportTopLevel
+import scala.scalajs.js.annotation.{JSGlobal, JSExportTopLevel}
 import scala.scalajs.js.JSConverters.*
 import scala.scalajs.js.typedarray.Uint8Array
 import scala.scalajs.js.wasm.JSPI.allowOrphanJSAwait
@@ -13,6 +14,10 @@ import scala.util.control.NonFatal
 
 /** JS entry point of the `dotc` batch compiler. */
 object MainJS extends JSDriver:
+  @js.native
+  @JSGlobal("globalThis")
+  private object GlobalThis extends js.Object
+
   private val MissingMacroEntryPointExitCode = 125
   private val DefaultMaxMacroLinkRestarts = 8
   private val importedModuleNamespaces = mutable.LinkedHashMap.empty[String, js.Dynamic]
@@ -28,10 +33,17 @@ object MainJS extends JSDriver:
   def runWithMacroLinkingAsync(args: js.Array[String], relink: js.Function1[js.Dynamic, js.Any]): js.Promise[Int] =
     runWithMacroLinkingAsyncWithLimit(args, relink, DefaultMaxMacroLinkRestarts)
 
+  @JSExportTopLevel("runScala3CompilerSJSWithBrowserMacroLinkingAsync")
+  def runWithBrowserMacroLinkingAsync(args: js.Array[String]): js.Promise[Int] =
+    val relink: js.Function1[js.Dynamic, js.Any] =
+      (request: js.Dynamic) => SjsBrowserMacroLinker.relink(request)
+    runWithMacroLinkingAsync(args, relink)
+
   @JSExportTopLevel("runScala3CompilerSJSWithMacroLinkingAsyncWithLimit")
   def runWithMacroLinkingAsyncWithLimit(args: js.Array[String], relink: js.Function1[js.Dynamic, js.Any], maxRestarts: Int): js.Promise[Int] =
     js.async {
-      runWithMacroLinkingImpl(args.toArray, relink, maxRestarts)
+      try runWithMacroLinkingImpl(args.toArray, relink, maxRestarts)
+      finally clearPublicModuleUrls()
     }
 
   @JSExportTopLevel("emitScala3CompilerSJSMacroEntryPointsIRAsync")
@@ -122,11 +134,18 @@ object MainJS extends JSDriver:
       if missing == null then
         throw js.JavaScriptException("missing macro entry point interrupt did not record any entry points")
 
+      val emittedEntryPointsIR =
+        emitMacroEntryPointsIRImpl(args, missing.packageNames)
+      val entryPointsIR =
+        if emittedEntryPointsIR.nonEmpty then emittedEntryPointsIR
+        else missing.entryPointsIR
       val request = js.Dynamic.literal(
+        protocolVersion = 1,
         ids = missing.ids.toJSArray,
         packageNames = missing.packageNames.toJSArray,
+        entryPointsIR = entryPointsIR.map(toJSMacroEntryPointsIR).toJSArray,
       )
-      val linkedCompiler = awaitMaybePromise(relink(request))
+      val linkedCompiler = linkedCompilerFromRelinkResult(awaitMaybePromise(relink(request)))
       restartWithLinkedCompiler(linkedCompiler, args, relink, remainingRestarts - 1)
 
   private def lastMissingMacroEntryPointIds: String | Null =
@@ -143,15 +162,36 @@ object MainJS extends JSDriver:
       registerMacroEntryPoint(id, f)
     }
 
-  private def awaitMaybePromise(value: js.Any): js.Dynamic =
+  private def awaitMaybePromise(value: js.Any): js.Any =
     if value == null || js.isUndefined(value) then
       throw js.JavaScriptException("Scala.js macro relinker did not return a compiler module")
 
     val dynamicValue = value.asInstanceOf[js.Dynamic]
     val thenValue = dynamicValue.selectDynamic("then")
     if js.typeOf(thenValue) == "function" then
-      js.await(value.asInstanceOf[js.Promise[js.Dynamic]])
-    else dynamicValue
+      js.await(value.asInstanceOf[js.Promise[js.Any]])
+    else value
+
+  private def linkedCompilerFromRelinkResult(value: js.Any): js.Dynamic =
+    if value == null || js.isUndefined(value) then
+      throw js.JavaScriptException("Scala.js macro relinker did not return a compiler module")
+    else if js.typeOf(value) == "string" then
+      importPublicModule(value.toString)
+    else
+      val module = value.asInstanceOf[js.Dynamic]
+      if hasCompilerEntryPoint(module) then module
+      else
+        val moduleUrl = module.selectDynamic("moduleUrl")
+        if js.typeOf(moduleUrl) == "string" then importPublicModule(moduleUrl.toString)
+        else module
+
+  private def importPublicModule(url: String): js.Dynamic =
+    rememberPublicModuleUrl(url)
+    importModule(url)
+
+  private def hasCompilerEntryPoint(module: js.Dynamic): Boolean =
+    js.typeOf(module.selectDynamic("runScala3CompilerSJSWithMacroLinkingAsyncWithLimit")) == "function" ||
+      js.typeOf(module.selectDynamic("runScala3CompilerSJSAsync")) == "function"
 
   private def restartWithLinkedCompiler(
       linkedCompiler: js.Dynamic,
@@ -223,13 +263,46 @@ object MainJS extends JSDriver:
       case NonFatal(_) => false
 
   private def currentModules(): List[js.Dynamic] =
-    currentModuleUrls().map { url =>
-      importedModuleNamespaces.getOrElseUpdate(url, js.await(js.`import`[js.Dynamic](url)))
-    }
+    currentModuleUrls().flatMap(importModuleIfAvailable)
+
+  private def importModule(url: String): js.Dynamic =
+    importedModuleNamespaces.getOrElseUpdate(url, js.await(js.`import`[js.Dynamic](url)))
+
+  private def importModuleIfAvailable(url: String): Option[js.Dynamic] =
+    try Some(importModule(url))
+    catch
+      case NonFatal(_) => None
 
   private def currentModuleUrls(): List[String] =
     val metaUrl = js.`import`.meta.selectDynamic("url").toString
     val publicModuleUrl =
       if metaUrl.endsWith("/__loader.js") then Some(metaUrl.stripSuffix("__loader.js") + "main.js")
       else None
-    (metaUrl :: publicModuleUrl.toList).distinct
+    (rememberedPublicModuleUrls().reverse ::: metaUrl :: publicModuleUrl.toList).distinct
+
+  private def rememberedPublicModuleUrls(): List[String] =
+    val urls = GlobalThis.asInstanceOf[js.Dynamic].selectDynamic("__scala3CompilerSJSPublicModuleUrls")
+    if urls == null || js.isUndefined(urls) then Nil
+    else urls.asInstanceOf[js.Array[String]].toSeq.toList
+
+  private def rememberPublicModuleUrl(url: String): Unit =
+    val urls = publicModuleUrls()
+    var i = 0
+    while i < urls.length do
+      if urls(i) == url then return
+      i += 1
+    urls.push(url)
+    ()
+
+  private def publicModuleUrls(): js.Array[String] =
+    val globalThis = GlobalThis.asInstanceOf[js.Dynamic]
+    val urls = globalThis.selectDynamic("__scala3CompilerSJSPublicModuleUrls")
+    if urls == null || js.isUndefined(urls) then
+      val created = new js.Array[String]()
+      globalThis.updateDynamic("__scala3CompilerSJSPublicModuleUrls")(created)
+      created
+    else urls.asInstanceOf[js.Array[String]]
+
+  private def clearPublicModuleUrls(): Unit =
+    val globalThis = GlobalThis.asInstanceOf[js.Dynamic]
+    globalThis.updateDynamic("__scala3CompilerSJSPublicModuleUrls")(new js.Array[String]())

@@ -177,6 +177,7 @@ object Build {
   val fetchScalaJSSource = taskKey[File]("Fetch the sources of Scala.js")
   val bundleSjsCompilerLibs = taskKey[File]("Bundle the libraries required by the Node-hosted scala3-compiler-sjs hello world test")
   val sjsHelloWorldTest = taskKey[Unit]("Compile, link, and run HelloWorld.scala with scala3-compiler-sjs under Node.js using rt.jar on the compiler classpath")
+  val prepareBrowserIDE = taskKey[File]("Prepare the static browser IDE assets for scala3-compiler-sjs")
 
   lazy val SourceDeps = config("sourcedeps")
 
@@ -1818,6 +1819,7 @@ object Build {
       libraryDependencies ++= Seq(
         "org.scala-lang.modules" % "scala-asm" % "9.9.0-scala-1",
         Dependencies.compilerInterface,
+        ("org.scala-js" %%% "scalajs-linker" % scalaJSVersion).cross(CrossVersion.for3Use2_13),
       ),
       // Add the source directories for the compiler (boostrapped)
       Compile / unmanagedSourceDirectories   := Seq(baseDirectory.value / "src"),
@@ -1896,6 +1898,56 @@ object Build {
           ) ++ nonBootExternalDeps.map(_.data),
           "sjs-hello-world-test",
           "scala3-compiler-sjs hello world test passed",
+          s.log,
+        )
+      },
+      prepareBrowserIDE := {
+        val s = streams.value
+        val browserIdeDir = baseDirectory.value / "browser-ide"
+        val outputDir = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+        (Compile / fastLinkJS).value
+        val libsDir = bundleSjsCompilerLibs.value
+        (`scala-library-sjs` / Compile / compile).value
+        val scalaLibClasses = (`scala-library-sjs` / Compile / classDirectory).value
+        val report = (Compile / update).value
+        val scalaJSLibJar = report.select(
+          module = (_: ModuleID).name.startsWith("scalajs-library_")
+        ).headOption.getOrElse(sys.error("Could not find scalajs-library JAR"))
+        val rtJar = target.value / "browser-ide-assets" / "rt.jar"
+        val scalaLibJar = target.value / "browser-ide-assets" / "scala-lib.jar"
+        val compilerIRZip = target.value / "browser-ide-assets" / "compiler-sjsir.zip"
+        val runtimeIRZip = target.value / "browser-ide-assets" / "runtime-sjsir.zip"
+        val jszipDist = baseDirectory.value / "node_modules" / "jszip" / "dist" / "jszip.js"
+        val compilerIRClasspath = (Compile / fullClasspath).value.map(_.data)
+
+        if (!rtJar.exists()) {
+          s.log.info(s"Extracting java.base from jrt:/ to $rtJar")
+          SjsCompilerHelloWorld.extractRTJar(rtJar)
+        }
+
+        if (!runtimeIRZip.exists()) {
+          s.log.info(s"Packing runtime Scala.js IR into $runtimeIRZip")
+          SjsCompilerHelloWorld.zipDirectory(libsDir / "sjsir", runtimeIRZip)
+        }
+
+        s.log.info(s"Packing compiler Scala.js IR into $compilerIRZip")
+        SjsCompilerHelloWorld.zipIRClasspath(compilerIRClasspath, compilerIRZip)
+
+        s.log.info(s"Packing Scala.js library classes into $scalaLibJar")
+        SjsCompilerHelloWorld.zipDirectory(scalaLibClasses, scalaLibJar)
+
+        if (!jszipDist.exists())
+          sys.error("Missing Node dependency `jszip`. Run `cd compiler && npm install` before preparing browser IDE assets.")
+
+        SjsCompilerHelloWorld.prepareBrowserIDE(
+          browserIdeDir,
+          outputDir,
+          compilerIRZip,
+          scalaLibJar,
+          scalaJSLibJar,
+          rtJar,
+          runtimeIRZip,
+          jszipDist,
           s.log,
         )
       },

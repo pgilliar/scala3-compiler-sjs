@@ -1,14 +1,13 @@
 import java.io.{FileOutputStream, IOException}
 import java.net.InetSocketAddress
-import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.{FileSystems, Files}
+import java.security.MessageDigest
 import java.util.Base64
-import java.util.zip.{ZipEntry, ZipOutputStream}
+import java.util.zip.{ZipEntry, ZipFile, ZipOutputStream}
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 
 import sbt.*
-import org.scalajs.ir.{Serializers, Trees}
 import org.scalajs.linker.PathIRContainer
 import org.scalajs.linker.PathOutputDirectory
 import org.scalajs.linker.StandardImpl
@@ -22,10 +21,75 @@ import org.scalajs.logging.ScalaConsoleLogger
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
+import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 object SjsCompilerHelloWorld {
+  private val BrowserIDECompilerJSImport = """import * as importedjszip from "jszip";"""
+  private val BrowserIDEPatchedJSImport = """import * as importedjszip from "../vendor/jszip-wrapper.js";"""
+  private val MacroFixtureId = "hello-world-macro-fixture"
+  private val MacroFixturePackages = Seq("smokemacros", "othermacros")
+
+  private final case class SmokeIRFile(path: String, bytes: Array[Byte])
+
+  private final case class SmokeMacroArtifact(
+      id: String,
+      macroPackages: Seq[String],
+      root: File,
+      implementationIR: Seq[SmokeIRFile],
+  )
+
+  private def jsonString(value: String): String =
+    "\"" + value.flatMap {
+      case '\\' => "\\\\"
+      case '"' => "\\\""
+      case '\n' => "\\n"
+      case '\r' => "\\r"
+      case '\t' => "\\t"
+      case c if c < ' ' => "\\u%04x".format(c.toInt)
+      case c => c.toString
+    } + "\""
+
+  private def readIRFiles(root: File): Seq[SmokeIRFile] =
+    (root ** "*.sjsir").get.flatMap { file =>
+      IO.relativize(root, file).map { relativePath =>
+        SmokeIRFile(relativePath, Files.readAllBytes(file.toPath))
+      }
+    }.sortBy(_.path)
+
+  private def smokeMacroArtifact(id: String, macroPackages: Seq[String], root: File): SmokeMacroArtifact =
+    SmokeMacroArtifact(
+      id = id,
+      macroPackages = macroPackages.distinct.sorted,
+      root = root,
+      implementationIR = readIRFiles(root),
+    )
+
+  private def smokeRelinkCacheKey(
+      entryPointsIR: Seq[SmokeIRFile],
+      macroImplementationIR: Seq[SmokeIRFile],
+      linkerConfig: Seq[String],
+  ): String = {
+    val digest = MessageDigest.getInstance("SHA-256")
+    updateDigestString(digest, "scala3-sjs-macro-smoke-relink-v1")
+    updateDigestIRFiles(digest, "macro-entrypoints-ir", entryPointsIR)
+    updateDigestIRFiles(digest, "macro-implementation-ir", macroImplementationIR)
+    linkerConfig.sorted.foreach(updateDigestString(digest, _))
+    digest.digest().map(b => "%02x".format(b & 0xff)).mkString
+  }
+
+  private def updateDigestIRFiles(digest: MessageDigest, section: String, files: Seq[SmokeIRFile]): Unit = {
+    updateDigestString(digest, section)
+    files.sortBy(_.path).foreach { file =>
+      updateDigestString(digest, file.path)
+      digest.update(file.bytes)
+    }
+  }
+
+  private def updateDigestString(digest: MessageDigest, value: String): Unit =
+    digest.update(value.getBytes(StandardCharsets.UTF_8))
+
   def bundleCompilerLibs(
       targetDir: File,
       scalaLibClasses: File,
@@ -66,6 +130,149 @@ object SjsCompilerHelloWorld {
     }
 
     libDir
+  }
+
+  def prepareBrowserIDE(
+      browserIdeDir: File,
+      compilerOutputDir: File,
+      compilerIRZip: File,
+      scalaLibJar: File,
+      scalaJSLibJar: File,
+      rtJar: File,
+      runtimeIRZip: File,
+      jszipDist: File,
+      log: Logger,
+  ): File = {
+    val assetsDir = browserIdeDir / "assets"
+    val compilerDir = assetsDir / "compiler"
+    val vendorDir = assetsDir / "vendor"
+    val classpathDir = assetsDir / "classpath"
+    val runtimeDir = assetsDir / "runtime"
+
+    IO.delete(assetsDir)
+    Seq(compilerDir, vendorDir, classpathDir, runtimeDir).foreach(IO.createDirectory)
+
+    val compilerMain = compilerOutputDir / "main.js"
+    val compilerWasm = compilerOutputDir / "main.wasm"
+    val compilerLoader = compilerOutputDir / "__loader.js"
+    if (!compilerMain.exists() || !compilerWasm.exists() || !compilerLoader.exists())
+      sys.error(s"Missing scala3-compiler-sjs fastLink output in $compilerOutputDir. Run fastLinkJS first.")
+
+    val compilerMainContents = IO.read(compilerMain)
+    val patchedCompilerMain = compilerMainContents.replace(BrowserIDECompilerJSImport, BrowserIDEPatchedJSImport)
+    if (patchedCompilerMain == compilerMainContents)
+      sys.error(s"Could not rewrite JSZip import in ${compilerMain.getAbsolutePath}")
+
+    IO.write(compilerDir / "main.js", patchedCompilerMain)
+    Seq(
+      compilerLoader -> (compilerDir / "__loader.js"),
+      compilerWasm -> (compilerDir / "main.wasm"),
+      jszipDist -> (vendorDir / "jszip.global.js"),
+      rtJar -> (classpathDir / "rt.jar"),
+      scalaLibJar -> (classpathDir / "scala-lib.jar"),
+      scalaJSLibJar -> (classpathDir / "scalajs-lib.jar"),
+      compilerIRZip -> (compilerDir / "compiler-sjsir.zip"),
+      runtimeIRZip -> (runtimeDir / "runtime-sjsir.zip"),
+    ).foreach { case (src, dest) => IO.copyFile(src, dest) }
+
+    IO.write(
+      vendorDir / "jszip-wrapper.js",
+      """import "./jszip.global.js";
+        |
+        |const JSZip = globalThis.JSZip;
+        |
+        |if (!JSZip) {
+        |  throw new Error("JSZip failed to initialize for the browser IDE.");
+        |}
+        |
+        |export default JSZip;
+        |""".stripMargin
+    )
+
+    IO.write(
+      assetsDir / "manifest.json",
+      s"""{
+        |  "compilerModule": "./assets/compiler/main.js",
+        |  "compilerIR": "./assets/compiler/compiler-sjsir.zip",
+        |  "runtimeIR": "./assets/runtime/runtime-sjsir.zip",
+        |  "classpath": [
+        |    { "path": "/lib/rt.jar", "url": "./assets/classpath/rt.jar" },
+        |    { "path": "/lib/scala-lib.jar", "url": "./assets/classpath/scala-lib.jar" },
+        |    { "path": "/lib/scalajs-lib.jar", "url": "./assets/classpath/scalajs-lib.jar" }
+        |  ]
+        |}
+        |""".stripMargin
+    )
+
+    log.info(s"Prepared browser IDE assets in $browserIdeDir")
+    browserIdeDir
+  }
+
+  def zipIRClasspath(classpathEntries: Seq[File], targetZip: File): File = {
+    IO.createDirectory(targetZip.getParentFile)
+
+    val files = mutable.LinkedHashMap.empty[String, Array[Byte]]
+
+    def add(path: String, bytes: Array[Byte]): Unit = {
+      val normalized = path.replace('\\', '/').stripPrefix("/")
+      if (normalized.endsWith(".sjsir") && !files.contains(normalized))
+        files(normalized) = bytes
+    }
+
+    classpathEntries.foreach { entry =>
+      if (entry.isDirectory) {
+        (entry ** "*.sjsir").get.foreach { file =>
+          IO.relativize(entry, file).foreach { relativePath =>
+            add(relativePath, IO.readBytes(file))
+          }
+        }
+      } else if (entry.isFile && (entry.getName.endsWith(".jar") || entry.getName.endsWith(".zip"))) {
+        val zipFile = new ZipFile(entry)
+        try {
+          zipFile.entries().asScala.foreach { zipEntry =>
+            if (!zipEntry.isDirectory && zipEntry.getName.endsWith(".sjsir")) {
+              val in = zipFile.getInputStream(zipEntry)
+              try add(zipEntry.getName, in.readAllBytes())
+              finally in.close()
+            }
+          }
+        } finally {
+          zipFile.close()
+        }
+      }
+    }
+
+    val zipStream = new ZipOutputStream(new FileOutputStream(targetZip))
+    try {
+      files.toSeq.sortBy(_._1).foreach { case (path, bytes) =>
+        zipStream.putNextEntry(new ZipEntry(path))
+        zipStream.write(bytes)
+        zipStream.closeEntry()
+      }
+    } finally {
+      zipStream.close()
+    }
+
+    targetZip
+  }
+
+  def zipDirectory(sourceDir: File, targetZip: File): File = {
+    IO.createDirectory(targetZip.getParentFile)
+
+    val files = (sourceDir ** "*").get.filter(_.isFile)
+    val zipStream = new ZipOutputStream(new FileOutputStream(targetZip))
+    try {
+      files.foreach { file =>
+        val relative = sourceDir.toPath.relativize(file.toPath).iterator().asScala.mkString("/")
+        zipStream.putNextEntry(new ZipEntry(relative))
+        zipStream.write(IO.readBytes(file))
+        zipStream.closeEntry()
+      }
+    } finally {
+      zipStream.close()
+    }
+
+    targetZip
   }
 
   def extractRTJar(targetRTJar: File): Unit = {
@@ -117,6 +324,7 @@ object SjsCompilerHelloWorld {
     val smokeRoot = targetDir / smokeDirName
     val macroSeedOut = smokeRoot / "macro-classpath"
     val macroEntryPointsOut = smokeRoot / "macro-entrypoints"
+    val macroImplementationIROut = smokeRoot / "macro-implementation-ir"
     val compileOut = smokeRoot / "classes"
     val linkOut = smokeRoot / "linked"
     val helloSource = baseDir / "compiler" / "test-resources" / "sjs-compiler" / "HelloWorld.scala"
@@ -125,41 +333,39 @@ object SjsCompilerHelloWorld {
     val otherMacroSource = baseDir / "compiler" / "test-resources" / "sjs-compiler" / "HelloWorldOtherMacro.scala"
     val compilerMain = outputDir / "main.js"
     val compilerRunner = smokeRoot / "run-compiler.mjs"
-    val macroScanPackages = Seq("smokemacros", "othermacros")
+    val macroScanPackages = MacroFixturePackages
     val expectedMacroIds = Seq(
       "smokemacros.MacroLibrary$#smokemacros.MacroLibrary$.macro1Signature(List(java.lang.String),java.lang.String)",
       "smokemacros.MacroLibrary$#smokemacros.MacroLibrary$.macro2Signature(List(java.lang.String),java.lang.String)",
       "othermacros.OtherMacroLibrary$#othermacros.OtherMacroLibrary$.macro3Signature(List(java.lang.String),java.lang.String)",
-    )
-    val expectedMacroEntryPointsExportNames = Map(
-      "smokemacros" -> "__scala3_sjs_macro_entrypoints_smokemacros",
-      "othermacros" -> "__scala3_sjs_macro_entrypoints_othermacros",
     )
     val macroCompilerLinkOut = smokeRoot / "macro-compiler-linked"
     val macroUseSource = smokeRoot / "MacroUse.scala"
     val macroUseOut = smokeRoot / "macro-use-classes"
     val macroUseLinkOut = smokeRoot / "macro-use-linked"
     val macroUseCompileRunner = smokeRoot / "run-macro-use-compile.mjs"
-    val generatedMacroPackagePaths =
-      macroScanPackages.map(packageName =>
-        packageName -> (Seq("dotty", "tools", "dotc", "sjsmacros", "generated") ++ packageName.split('.'))
-      ).toMap
-    val directEntryPointsRoots =
-      generatedMacroPackagePaths.map { case (packageName, path) => packageName -> path.foldLeft(macroEntryPointsOut)(_ / _) }
-    val expectedDirectIRFiles = Set("MacroEntryPoints$.sjsir")
 
     def mkClasspath(entries: Seq[File]): String =
       entries.map(_.getAbsolutePath).mkString(java.io.File.pathSeparator)
 
+    def runLogged(command: Seq[String], failureMessage: String): String = {
+      val output = new StringBuilder
+      val exit = scala.sys.process.Process(command, baseDir).!(scala.sys.process.ProcessLogger(
+        out => output.append(out).append('\n'),
+        err => output.append(err).append('\n'),
+      ))
+      if (exit != 0)
+        sys.error(s"$failureMessage:\n$output")
+      output.toString
+    }
+
     def seedMacroClasspath(): Unit = {
       IO.createDirectory(macroSeedOut)
-      val seedLog = new StringBuilder
-      val seedClasspath = mkClasspath(jvmSeedCompilerClasspathEntries)
-      val seedExit = scala.sys.process.Process(
+      runLogged(
         Seq(
           "java",
           "-cp",
-          seedClasspath,
+          mkClasspath(jvmSeedCompilerClasspathEntries),
           "dotty.tools.dotc.Main",
           "-classpath",
           (libsDir / "scala-lib").getAbsolutePath,
@@ -170,19 +376,12 @@ object SjsCompilerHelloWorld {
           macroHelperSource.getAbsolutePath,
           otherMacroSource.getAbsolutePath,
         ),
-        baseDir,
-      ).!(scala.sys.process.ProcessLogger(
-        out => seedLog.append(out).append('\n'),
-        err => seedLog.append(err).append('\n'),
-      ))
-
-      if (seedExit != 0)
-        sys.error(s"Failed to seed macro classpath:\n$seedLog")
+        "Failed to seed macro classpath",
+      )
     }
 
     def addMacroImplementationIRToClasspath(): Unit = {
-      val compileLog = new StringBuilder
-      val compileExit = scala.sys.process.Process(
+      runLogged(
         Seq("node") ++ nodeFlags ++ Seq(
           compilerRunner.getAbsolutePath,
           "-classpath", mkClasspath(compilerClasspathEntries :+ macroSeedOut),
@@ -191,31 +390,29 @@ object SjsCompilerHelloWorld {
           macroHelperSource.getAbsolutePath,
           otherMacroSource.getAbsolutePath,
         ),
-        baseDir,
-      ).!(scala.sys.process.ProcessLogger(
-        out => compileLog.append(out).append('\n'),
-        err => compileLog.append(err).append('\n'),
-      ))
-
-      if (compileExit != 0)
-        sys.error(s"scala3-compiler-sjs failed to add macro implementation IR to the macro classpath fixture:\n$compileLog")
+        "scala3-compiler-sjs failed to add macro implementation IR to the macro classpath fixture",
+      )
     }
 
-    def readSjsIR(file: File): Trees.ClassDef =
-      Serializers.deserialize(ByteBuffer.wrap(Files.readAllBytes(file.toPath)))
+    def writeIRFiles(rootFile: File, files: Seq[SmokeIRFile]): Unit = {
+      val root = rootFile.toPath.toAbsolutePath.normalize()
+      IO.delete(rootFile)
+      IO.createDirectory(rootFile)
 
-    def assertGeneratedMacroIR(actualRoot: File, expectedExportName: String): Unit = {
-      val actualFiles = (actualRoot ** "*.sjsir").get.flatMap(f => IO.relativize(actualRoot, f).map(_ -> f)).toMap
+      for (file <- files) {
+        val relativePath = file.path
+        if (relativePath.startsWith("/") || relativePath.contains('\\'))
+          sys.error(s"Unsafe IR path: $relativePath")
 
-      if (actualFiles.keySet != expectedDirectIRFiles) {
-        sys.error(
-          s"Unexpected direct macro IR files: ${actualFiles.keySet.toList.sorted.mkString("[", ", ", "]")}"
-        )
+        val target = root.resolve(relativePath).normalize()
+        if (!target.startsWith(root))
+          sys.error(s"Unsafe IR path: $relativePath")
+
+        val parent = target.getParent
+        if (parent != null)
+          Files.createDirectories(parent)
+        Files.write(target, file.bytes)
       }
-
-      val exports = readSjsIR(actualFiles("MacroEntryPoints$.sjsir")).topLevelExportDefs.map(_.topLevelExportName).toSet
-      if (!exports.contains(expectedExportName))
-        sys.error(s"Generated macro IR did not export $expectedExportName; exports=${exports.toList.sorted.mkString("[", ", ", "]")}")
     }
 
     def writeMacroUseSource(target: File): Unit =
@@ -235,7 +432,6 @@ object SjsCompilerHelloWorld {
     def writeResolvingMacroCompileRunner(
         target: File,
         compilerJS: File,
-        emitArgs: Seq[String],
         compileArgs: Seq[String],
         relinkURL: String,
     ): Unit = {
@@ -249,7 +445,6 @@ object SjsCompilerHelloWorld {
           case c => c.toString
         } + "\""
 
-      val jsEmitArgs = emitArgs.map(toJSLiteral).mkString("[", ", ", "]")
       val jsCompileArgs = compileArgs.map(toJSLiteral).mkString("[", ", ", "]")
       val expectedMacroIdsJS = expectedMacroIds.map(toJSLiteral).mkString("[", ", ", "]")
       val expectedMacroPackagesJS = macroScanPackages.map(toJSLiteral).mkString("[", ", ", "]")
@@ -264,6 +459,7 @@ object SjsCompilerHelloWorld {
            |
            |function encodeEntry(entry) {
            |  return [
+           |    Buffer.from(entry.packageName, 'utf8').toString('base64'),
            |    Buffer.from(entry.path, 'utf8').toString('base64'),
            |    Buffer.from(entry.bytes).toString('base64')
            |  ].join('\\t')
@@ -295,9 +491,11 @@ object SjsCompilerHelloWorld {
            |const expectedMacroPackageList = [...expectedMacroPackages].sort().join('|')
            |
            |const relinkRequests = []
-           |const code = await compiler.runScala3CompilerSJSWithMacroLinkingAsync(
-           |  $jsCompileArgs,
-           |  async request => {
+           |globalThis.__scala3CompilerSJSMacroLinker = {
+           |  async linkCompilerWithMacros(request) {
+           |    if (request.protocolVersion !== 1) {
+           |      throw new Error(`unexpected macro relink protocol version: $${request.protocolVersion}`)
+           |    }
            |    const requestIds = [...request.ids].sort()
            |    const requestPackages = [...request.packageNames].sort()
            |    relinkRequests.push(requestIds.join('|'))
@@ -308,15 +506,21 @@ object SjsCompilerHelloWorld {
            |      throw new Error(`unexpected macro relink package: $${requestPackages.join('|')}`)
            |    }
            |
-           |    const emitted = await compiler.emitScala3CompilerSJSMacroEntryPointsIRAsync($jsEmitArgs, request.packageNames)
+           |    const emitted = [...request.entryPointsIR]
            |    if (emitted.length !== expectedMacroPackages.length) {
            |      throw new Error(`unexpected emitted macro entrypoint count: $${emitted.length}`)
            |    }
            |
            |    const linked = await requestLinkedCompiler(emitted)
-           |    return await import(linked.moduleUrl)
+           |    const cached = await requestLinkedCompiler(emitted)
+           |    if (!cached.cacheHit || cached.cacheKey !== linked.cacheKey || cached.moduleUrl !== linked.moduleUrl) {
+           |      throw new Error(`unexpected macro relink cache response: $${JSON.stringify(cached)}`)
+           |    }
+           |    return linked.moduleUrl
            |  }
-           |)
+           |}
+           |
+           |const code = await compiler.runScala3CompilerSJSWithBrowserMacroLinkingAsync($jsCompileArgs)
            |if (code !== 0) process.exit(code)
            |
            |if (relinkRequests.length !== 1 || relinkRequests[0] !== expectedMacroIdList) {
@@ -327,17 +531,11 @@ object SjsCompilerHelloWorld {
       )
     }
 
-    def withMacroRelinkServer(body: String => Unit): Unit = {
-      def jsonString(value: String): String =
-        "\"" + value.flatMap {
-          case '\\' => "\\\\"
-          case '"' => "\\\""
-          case '\n' => "\\n"
-          case '\r' => "\\r"
-          case '\t' => "\\t"
-          case c if c < ' ' => "\\u%04x".format(c.toInt)
-          case c => c.toString
-        } + "\""
+    def withMacroRelinkServer(macroArtifacts: Seq[SmokeMacroArtifact])(body: String => Unit): Unit = {
+      val availableMacroImplementationIR = macroArtifacts.flatMap(_.implementationIR).sortBy(_.path)
+      val availableMacroPackages = macroArtifacts.iterator.flatMap(_.macroPackages).toSet
+      val macroArtifactDescriptors =
+        macroArtifacts.map(artifact => s"${artifact.id}:${artifact.macroPackages.mkString(",")}").sorted
 
       def send(exchange: HttpExchange, status: Int, response: String): Unit = {
         val bytes = response.getBytes(StandardCharsets.UTF_8)
@@ -348,52 +546,77 @@ object SjsCompilerHelloWorld {
         finally out.close()
       }
 
-      def writePostedMacroEntryPoints(exchange: HttpExchange): Unit = {
+      final case class PostedMacroEntryPoint(packageName: String, file: SmokeIRFile)
+
+      def readPostedMacroEntryPoints(exchange: HttpExchange): Seq[PostedMacroEntryPoint] = {
         val body =
           try new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
           finally exchange.getRequestBody.close()
-        val root = macroEntryPointsOut.toPath.toAbsolutePath.normalize()
-        IO.delete(macroEntryPointsOut)
-        IO.createDirectory(macroEntryPointsOut)
 
-        for (line <- body.linesIterator if line.nonEmpty) {
-          val separator = line.indexOf('\t')
-          if (separator < 0)
+        body.linesIterator.filter(_.nonEmpty).map { line =>
+          val parts = line.split("\t", -1)
+          if (parts.length != 3)
             sys.error("Malformed macro entry point upload")
 
-          val relativePath = new String(Base64.getDecoder.decode(line.substring(0, separator)), StandardCharsets.UTF_8)
+          val packageName = new String(Base64.getDecoder.decode(parts(0)), StandardCharsets.UTF_8)
+          val relativePath = new String(Base64.getDecoder.decode(parts(1)), StandardCharsets.UTF_8)
           if (relativePath.startsWith("/") || relativePath.contains('\\'))
             sys.error(s"Unsafe macro entry point path: $relativePath")
 
-          val target = root.resolve(relativePath).normalize()
-          if (!target.startsWith(root))
-            sys.error(s"Unsafe macro entry point path: $relativePath")
-
-          val parent = target.getParent
-          if (parent != null)
-            Files.createDirectories(parent)
-          Files.write(target, Base64.getDecoder.decode(line.substring(separator + 1)))
-        }
+          PostedMacroEntryPoint(packageName, SmokeIRFile(relativePath, Base64.getDecoder.decode(parts(2))))
+        }.toSeq
       }
 
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
-      var requestCount = 0
+      val linkedCompilerCache = mutable.LinkedHashMap.empty[String, File]
       server.createContext("/link", (exchange: HttpExchange) => {
         try {
           if (exchange.getRequestMethod != "POST") {
             send(exchange, 405, """{"error":"method not allowed"}""")
           } else {
-            writePostedMacroEntryPoints(exchange)
-            requestCount += 1
-            val linkedJS = linkScalaJSForTest(
-              compilerSJSClasspathEntries ++ Seq(macroSeedOut, macroEntryPointsOut),
-              macroCompilerLinkOut / s"request-$requestCount",
-              Nil,
-              ModuleKind.ESModule,
-              log,
-              useWebAssembly = true,
+            val postedEntryPoints = readPostedMacroEntryPoints(exchange)
+            val requestedPackages = postedEntryPoints.map(_.packageName).toSet
+            val unknownPackages = requestedPackages -- availableMacroPackages
+            if (unknownPackages.nonEmpty)
+              sys.error(s"Relink request contains packages missing from macro artifacts: ${unknownPackages.toList.sorted.mkString(", ")}")
+
+            val entryPointsIR = postedEntryPoints.map(_.file)
+            val macroImplementationIR = availableMacroImplementationIR
+            val cacheKey = smokeRelinkCacheKey(
+              entryPointsIR = entryPointsIR,
+              macroImplementationIR = macroImplementationIR,
+              linkerConfig = Seq(
+                "moduleKind=ESModule",
+                "moduleInitializers=none",
+                "useWebAssembly=true",
+                "esVersion=ES2018",
+              ) ++ macroArtifactDescriptors.map("macroArtifact=" + _),
             )
-            send(exchange, 200, s"""{"moduleUrl":${jsonString(linkedJS.toURI.toASCIIString)}}""")
+            val shortCacheKey = cacheKey.take(16)
+            val cacheHit = linkedCompilerCache.contains(cacheKey)
+            val macroImplementationOut = macroImplementationIROut / cacheKey
+
+            writeIRFiles(macroEntryPointsOut, entryPointsIR)
+            writeIRFiles(macroImplementationOut, macroImplementationIR)
+
+            val linkedJS =
+              if (cacheHit) {
+                log.info(s"Macro relink cache hit $shortCacheKey")
+                linkedCompilerCache(cacheKey)
+              } else {
+                log.info(s"Macro relink cache miss $shortCacheKey implementation IR: ${macroImplementationIR.map(_.path).sorted.mkString(", ")}")
+                val linked = linkScalaJSForTest(
+                  compilerSJSClasspathEntries ++ Seq(macroImplementationOut, macroEntryPointsOut),
+                  macroCompilerLinkOut / cacheKey,
+                  Nil,
+                  ModuleKind.ESModule,
+                  log,
+                  useWebAssembly = true,
+                )
+                linkedCompilerCache(cacheKey) = linked
+                linked
+              }
+            send(exchange, 200, s"""{"moduleUrl":${jsonString(linkedJS.toURI.toASCIIString)},"cacheKey":${jsonString(cacheKey)},"cacheHit":$cacheHit}""")
           }
         } catch {
           case NonFatal(t) =>
@@ -413,23 +636,23 @@ object SjsCompilerHelloWorld {
     writeRunner(compilerRunner, compilerMain)
     seedMacroClasspath()
     addMacroImplementationIRToClasspath()
+    val macroArtifacts = Seq(
+      smokeMacroArtifact(
+        id = MacroFixtureId,
+        macroPackages = macroScanPackages,
+        root = macroSeedOut,
+      )
+    )
 
-    val compileLog = new StringBuilder
-    val compileExit = scala.sys.process.Process(
+    val compileLog = runLogged(
       Seq("node") ++ nodeFlags ++ Seq(
         compilerRunner.getAbsolutePath,
         "-classpath", mkClasspath(compilerClasspathEntries),
         "-d", compileOut.getAbsolutePath,
         helloSource.getAbsolutePath,
       ),
-      baseDir,
-    ).!(scala.sys.process.ProcessLogger(
-      out => compileLog.append(out).append('\n'),
-      err => compileLog.append(err).append('\n'),
-    ))
-
-    if (compileExit != 0)
-      sys.error(s"scala3-compiler-sjs failed to compile HelloWorld.scala:\n$compileLog")
+      "scala3-compiler-sjs failed to compile HelloWorld.scala",
+    )
 
     compileLog.linesIterator
       .filter(_.startsWith("[classpath-macros]"))
@@ -438,44 +661,22 @@ object SjsCompilerHelloWorld {
     writeMacroUseSource(macroUseSource)
     IO.createDirectory(macroUseOut)
     val macroUseCompileArgs = Seq(
-      "-classpath", mkClasspath(compilerClasspathEntries :+ macroSeedOut),
+      "-classpath", mkClasspath(compilerClasspathEntries ++ macroArtifacts.map(_.root)),
       "-d", macroUseOut.getAbsolutePath,
       macroUseSource.getAbsolutePath,
     )
-    val macroEntryPointEmitArgs = Seq(
-      "-classpath", mkClasspath(compilerClasspathEntries :+ macroSeedOut),
-    )
 
-    val macroUseCompileLog = new StringBuilder
-    val macroUseCompileExit = {
-      var exit = -1
-      withMacroRelinkServer { relinkURL =>
-        writeResolvingMacroCompileRunner(
-          macroUseCompileRunner,
-          compilerMain,
-          macroEntryPointEmitArgs,
-          macroUseCompileArgs,
-          relinkURL,
-        )
-        exit = scala.sys.process.Process(
-          Seq("node") ++ nodeFlags ++ Seq(macroUseCompileRunner.getAbsolutePath),
-          baseDir,
-        ).!(scala.sys.process.ProcessLogger(
-          out => macroUseCompileLog.append(out).append('\n'),
-          err => macroUseCompileLog.append(err).append('\n'),
-        ))
-      }
-      exit
-    }
-
-    if (macroUseCompileExit != 0)
-      sys.error(s"Macro use compilation with on-demand entry point resolution failed:\n$macroUseCompileLog")
-
-    for ((packageName, root) <- directEntryPointsRoots) {
-      if (!root.exists())
-        sys.error(s"Expected direct macro entry point IR for package `$packageName` under ${root.getAbsolutePath}")
-
-      assertGeneratedMacroIR(root, expectedMacroEntryPointsExportNames(packageName))
+    withMacroRelinkServer(macroArtifacts) { relinkURL =>
+      writeResolvingMacroCompileRunner(
+        macroUseCompileRunner,
+        compilerMain,
+        macroUseCompileArgs,
+        relinkURL,
+      )
+      runLogged(
+        Seq("node") ++ nodeFlags ++ Seq(macroUseCompileRunner.getAbsolutePath),
+        "Macro use compilation with on-demand entry point resolution failed",
+      )
     }
 
     val macroUseJS = linkScalaJSForTest(
@@ -486,18 +687,10 @@ object SjsCompilerHelloWorld {
       log,
     )
 
-    val macroUseRunLog = new StringBuilder
-    val macroUseRunExit = scala.sys.process.Process(
+    val macroUseOutput = runLogged(
       Seq("node", macroUseJS.getAbsolutePath),
-      baseDir,
-    ).!(scala.sys.process.ProcessLogger(
-      out => macroUseRunLog.append(out).append('\n'),
-      err => macroUseRunLog.append(err).append('\n'),
-    ))
-
-    val macroUseOutput = macroUseRunLog.toString
-    if (macroUseRunExit != 0)
-      sys.error(s"Linked macro-use output exited with code $macroUseRunExit:\n$macroUseOutput")
+      "Linked macro-use output failed",
+    )
     if (macroUseOutput != "hello macro\nbatch macro\npackage macro\n")
       sys.error(s"Expected macro-expanded program to print `hello macro`, `batch macro`, and `package macro`, got:\n$macroUseOutput")
 
@@ -509,18 +702,10 @@ object SjsCompilerHelloWorld {
       log,
     )
 
-    val runLog = new StringBuilder
-    val runExit = scala.sys.process.Process(
+    val output = runLogged(
       Seq("node", linkedJS.getAbsolutePath),
-      baseDir,
-    ).!(scala.sys.process.ProcessLogger(
-      out => runLog.append(out).append('\n'),
-      err => runLog.append(err).append('\n'),
-    ))
-
-    val output = runLog.toString
-    if (runExit != 0)
-      sys.error(s"Linked HelloWorld.js exited with code $runExit:\n$output")
+      "Linked HelloWorld.js failed",
+    )
     if (output != "hello world\n")
       sys.error(s"Expected HelloWorld.js to print `hello world`, got:\n$output")
 
