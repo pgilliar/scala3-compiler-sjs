@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scala Browser IDE</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <div class="filebar">
+        <div id="file-tabs" class="file-tabs" role="tablist" aria-label="Scala files"></div>
+        <div class="file-tools">
+          <input id="file-path" class="file-path" type="text" spellcheck="false" aria-label="Current file path">
+          <button id="add-file-button" type="button">New File</button>
+          <button id="delete-file-button" type="button">Delete</button>
+        </div>
+      </div>
+
+      <textarea id="source" spellcheck="false"></textarea>
+
+      <div class="controls">
+        <select id="example-select" aria-label="Example">
+          <option value="hello">Hello World</option>
+          <option value="multi">Multiple Files</option>
+          <option value="authorMacro">Author Macro</option>
+          <option value="externalMacro">External Macro</option>
+        </select>
+        <label class="diagnostics-toggle">
+          <input id="compiler-diagnostics-toggle" type="checkbox">
+          Diagnostics
+        </label>
+        <div id="compile-timer" class="compile-timer" hidden>
+          <span id="compile-timer-summary" class="compile-timer-summary" aria-live="polite"></span>
+          <button id="compile-timer-details" class="compile-timer-details" type="button" aria-controls="compile-timer-tooltip" aria-expanded="false" hidden>Details</button>
+          <div id="compile-timer-tooltip" class="compile-timer-tooltip" role="dialog" aria-label="Compile timing details" hidden></div>
+        </div>
+        <input id="import-macro-input" type="file" accept=".jar,.zip" multiple hidden>
+        <button id="import-macro-button" type="button" disabled>Import Macro</button>
+        <button id="run-button" type="button" disabled>Run</button>
+      </div>
+
+      <div class="terminal">
+        <pre id="output" class="output"></pre>
+        <form id="terminal-form" class="terminal-form" hidden>
+          <span class="terminal-prefix">&gt;</span>
+          <input id="terminal-input" class="terminal-input" type="text" autocomplete="off" spellcheck="false">
+        </form>
+      </div>
+    </main>
+
+    <script type="module">
+      import(`./app.js?boot=${Date.now()}`);
+    </script>
+  </body>
+</html>

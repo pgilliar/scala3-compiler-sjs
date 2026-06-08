@@ -359,7 +359,7 @@ private sealed trait OptimizerSettings:
   def optAllowSkipCoreModuleInit(using Context): Boolean = optEnabled("allow-skip-core-module-init")
   def optAssumeModulesNonNull(using Context): Boolean = optEnabled("assume-modules-non-null")
   def optAllowSkipClassLoading(using Context): Boolean = optEnabled("allow-skip-class-loading")
-  
+
   val inlineHelp =
     """Inlining requires a list of patterns defining where code can be inlined from: `-opt-inline:p1,p2`. (Use `-opt-inline:help` for more details)
       |
@@ -630,4 +630,3 @@ private sealed trait YSettings:
   @deprecated(message = "Scheduled for removal.", since = "3.5.0")
   val YoutputOnlyTasty: Setting[Boolean] = BooleanSetting(ForkSetting, "Youtput-only-tasty", "Used to only generate the TASTy file without the classfiles", deprecation = Deprecation.removed())
 end YSettings
-

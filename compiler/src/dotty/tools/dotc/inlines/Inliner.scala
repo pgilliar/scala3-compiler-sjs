@@ -1225,9 +1225,8 @@ class Inliner(val call: tpd.Tree)(using Context):
           Splicer.splice(body, splicePos, inlinedFrom.srcPos, MacroClassLoader.fromContext)
       )(
         {
-          //TODO SJS: macro class loader
-          report.error("quoted macro expansion is not supported by scala3-compiler-sjs", splicePos)
-          errorTree(ref(defn.Predef_undefined), em"quoted macro expansion is not supported by scala3-compiler-sjs", splicePos)
+          inContext(quoted.MacroExpansion.context(inlinedFrom)):
+            Splicer.spliceRegistered(body, call.symbol.asTerm, splicePos, inlinedFrom.srcPos)
         }
       )
     val inlinedNormalizer = new TreeMap {

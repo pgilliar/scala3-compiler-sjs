@@ -11,6 +11,7 @@ import reporting.*
 import core.Decorators.*
 import util.chaining.*
 import util.PlatformDependent.platformDependent
+import dotty.tools.dotc.sjsmacros.{MacroRuntimeRegistry, MissingMacroEntryPointException}
 
 import scala.util.control.NonFatal
 import fromtasty.{TASTYCompiler, TastyFileUtil}
@@ -22,6 +23,13 @@ import fromtasty.{TASTYCompiler, TastyFileUtil}
  *  existing object [[Main]].
  */
 class Driver {
+
+  private def throwMissingMacroEntryPointsIfAny(): Unit =
+    platformDependent[Unit](()) {
+      MacroRuntimeRegistry.missingEntryPointsException match
+        case Some(ex) => throw ex
+        case None => ()
+    }
 
   protected def newCompiler(using Context): Compiler =
     platformDependent(
@@ -40,8 +48,11 @@ class Driver {
         val run = compiler.newRun
         runOrNull = run
         run.compile(files)
+        throwMissingMacroEntryPointsIfAny()
         finish(compiler, run)
       catch
+        case ex: MissingMacroEntryPointException =>
+          throw ex
         case ex: FatalError =>
           report.error(ex.getMessage) // signals that we should fail compilation.
         case ex: Throwable if ctx.usedBestEffortTasty =>
@@ -67,8 +78,8 @@ class Driver {
       val run1 = compiler.newRun
       run1.compileSuspendedUnits(suspendedUnits, !run.suspendedAtTyperPhase)
       val nextCtx = ctx.fresh
-      // TODO SJS : macro class loader equivalent
       val _ = platformDependent[Unit]({ MacroClassLoader.init(nextCtx); () })(())
+      throwMissingMacroEntryPointsIfAny()
       finish(compiler, run1)(using nextCtx)
 
   protected def initCtx: Context = (new ContextBase).initialCtx
@@ -84,11 +95,13 @@ class Driver {
    *  this method returns a list of files to compile and an updated Context.
    *  If compilation should be interrupted, this method returns None.
    */
-  def setup(args: Array[String], rootCtx: Context): Option[(List[AbstractFile], Context)] = {
+  def setup(args: Array[String], rootCtx: Context): Option[(List[AbstractFile], Context)] =
+    setup(args, rootCtx, sourcesRequired)
+
+  protected def setup(args: Array[String], rootCtx: Context, sourcesRequired: Boolean): Option[(List[AbstractFile], Context)] = {
     val ictx = rootCtx.fresh
     val summary = command.distill(args, ictx.settings)(ictx.settingsState)(using ictx)
     ictx.setSettings(summary.sstate)
-    // TODO SJS : macro class loader equivalent
     val _ = platformDependent[Unit]({ MacroClassLoader.init(ictx); () })(())
     Positioned.init(using ictx)
 
